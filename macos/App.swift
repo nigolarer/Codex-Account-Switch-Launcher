@@ -20,13 +20,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
 
     private func loadRuntimeConfiguration() -> Bool {
         guard let resources = Bundle.main.resourceURL else {
-            showFatal("App 资源目录不可用，请重新安装。")
+            showFatal("App resources are unavailable. Please reinstall Codex Switcher.")
             return false
         }
         runtimeRoot = resources.appendingPathComponent("runtime", isDirectory: true)
         serverURL = runtimeRoot.appendingPathComponent("app/server.py")
         guard FileManager.default.fileExists(atPath: serverURL.path) else {
-            showFatal("App 内置服务文件缺失，请重新运行 scripts/install-app.sh。")
+            showFatal("The bundled local service is missing. Please run scripts/install-app.sh again.")
             return false
         }
 
@@ -40,7 +40,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
             pythonPath = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) ?? ""
         }
         guard !pythonPath.isEmpty else {
-            showFatal("找不到可用的 Python 3。请安装 Python 3 后重新运行 scripts/install-app.sh。")
+            showFatal("No usable Python 3 installation was found. Install Python 3 and run scripts/install-app.sh again.")
             return false
         }
         return true
@@ -59,7 +59,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
             backing: .buffered,
             defer: false
         )
-        window.title = "Codex 账号切换启动器"
+        window.title = "Codex Switcher"
         window.minSize = NSSize(width: 900, height: 650)
         window.contentView = webView
         window.center()
@@ -113,7 +113,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
         process.environment = env
 
         let logDir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Logs/Codex Account Switch Launcher", isDirectory: true)
+            .appendingPathComponent("Library/Logs/Codex Switcher", isDirectory: true)
         try? FileManager.default.createDirectory(at: logDir, withIntermediateDirectories: true)
         let logURL = logDir.appendingPathComponent("native-app.log")
         if !FileManager.default.fileExists(atPath: logURL.path) {
@@ -130,7 +130,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
                 guard let self, self.ownsServer else { return }
                 self.ownsServer = false
                 if p.terminationStatus != 0 {
-                    self.showErrorPage("本地服务已退出（状态码 \(p.terminationStatus)）。可以退出并重新打开 App 重试。")
+                    self.showErrorPage("The local service exited with status \(p.terminationStatus). Quit and reopen Codex Switcher to retry.")
                 }
             }
         }
@@ -140,14 +140,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
             ownsServer = true
             waitForServer(attempt: 0)
         } catch {
-            showFatal("无法启动本地服务：\(error.localizedDescription)")
+            showFatal("Unable to start the local service: \(error.localizedDescription)")
         }
     }
 
     private func waitForServer(attempt: Int) {
         guard let url = launcherURL else { return }
         if attempt >= 60 {
-            showErrorPage("本地服务启动超时。请查看 ~/Library/Logs/Codex Account Switch Launcher/native-app.log")
+            showErrorPage("The local service timed out while starting. See ~/Library/Logs/Codex Switcher/native-app.log")
             return
         }
         probe(url: url) { [weak self] running in
@@ -190,14 +190,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
             .replacingOccurrences(of: ">", with: "&gt;")
         webView.loadHTMLString("""
         <html><body style='font-family:-apple-system;background:#111;color:#eee;padding:40px'>
-        <h2>Codex 账号切换启动器</h2><p>\(escaped)</p></body></html>
+        <h2>Codex Switcher</h2><p>\(escaped)</p></body></html>
         """, baseURL: nil)
     }
 
     private func showFatal(_ message: String) {
         let alert = NSAlert()
         alert.alertStyle = .critical
-        alert.messageText = "Codex 账号切换启动器"
+        alert.messageText = "Codex Switcher"
         alert.informativeText = message
         alert.runModal()
         NSApp.terminate(nil)

@@ -15,7 +15,7 @@ if [[ -f "$PLIST" ]]; then
   launchctl enable "gui/$UID_NOW/$LABEL" 2>/dev/null || true
   sleep 0.5
   open "http://127.0.0.1:$PORT/?v=$(date +%s)"
-  echo "Restarted installed Codex Account Switch Launcher on port $PORT."
+  echo "Restarted installed Codex Switcher on port $PORT."
   exit 0
 fi
 

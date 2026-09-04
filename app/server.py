@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
 STATIC = ROOT / "static"
-DATA_DIR = Path(os.environ.get("CODEX_LAUNCHER_DATA", str(Path.home() / "Library/Application Support/com.ping.codex-account-switch-launcher"))).expanduser()
+DATA_DIR = Path(os.environ.get("CODEX_LAUNCHER_DATA", str(Path.home() / "Library/Application Support/com.nigolarer.codex-switcher"))).expanduser()
 DB_PATH = DATA_DIR / "launcher.sqlite3"
 LEGACY_DB_PATH = Path.home() / ".local/share/codex-profile-launcher/launcher.sqlite3"
 LEGACY_PROJECT_DB = os.environ.get("CODEX_LAUNCHER_LEGACY_PROJECT_DB", "").strip()
@@ -22,9 +22,30 @@ HOST = os.environ.get("CODEX_LAUNCHER_HOST", "127.0.0.1")
 DEFAULT_PORT = 17831
 PORT_ENV = os.environ.get("CODEX_LAUNCHER_PORT")
 CHATGPT_APP = os.environ.get("CHATGPT_APP", "/Applications/ChatGPT.app")
-APP_VERSION = "0.17.0"
+APP_VERSION = "0.18.0"
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def migrate_previous_app_support_once():
+    """Copy data from the pre-rename Application Support location if the new app has no database yet."""
+    if DB_PATH.exists():
+        return
+    old_dir = Path.home() / "Library/Application Support/com.ping.codex-account-switch-launcher"
+    old_db = old_dir / "launcher.sqlite3"
+    if not old_db.exists():
+        return
+    try:
+        shutil.copy2(old_db, DB_PATH)
+        old_backups = old_dir / "backups"
+        new_backups = DATA_DIR / "backups"
+        if old_backups.is_dir() and not new_backups.exists():
+            shutil.copytree(old_backups, new_backups)
+    except OSError:
+        pass
+
+
+migrate_previous_app_support_once()
 
 
 def backup_existing_db_once_per_version():
@@ -248,9 +269,11 @@ def ensure_defaults():
         if not state_get(c, "last_switch_at"):
             state_set(c, "last_switch_at", epoch())
         if not state_get(c, "language"):
-            state_set(c, "language", "zh-CN")
+            state_set(c, "language", "en")
         if not state_get(c, "appearance"):
             state_set(c, "appearance", "dark")
+        if state_get(c, "welcome_seen") is None:
+            state_set(c, "welcome_seen", "0")
         if not state_get(c, "port"):
             state_set(c, "port", DEFAULT_PORT)
 
@@ -623,6 +646,7 @@ class Handler(SimpleHTTPRequestHandler):
                 lang = d.get("language")
                 appearance = d.get("appearance")
                 port = d.get("port")
+                welcome_seen = d.get("welcome_seen")
                 with conn() as c:
                     if lang is not None:
                         if lang not in ("zh-CN", "en"):
@@ -637,6 +661,8 @@ class Handler(SimpleHTTPRequestHandler):
                         if port < 1024 or port > 65535:
                             raise ValueError("Port must be between 1024 and 65535")
                         state_set(c, "port", port)
+                    if welcome_seen is not None:
+                        state_set(c, "welcome_seen", "1" if bool(welcome_seen) else "0")
                 return self.send_json(get_state())
 
             if path == "/api/launcher":
@@ -866,7 +892,7 @@ def main():
     except (ValueError, AttributeError):
         pass
 
-    print(f"Codex Account Switch Launcher v{APP_VERSION}: http://{HOST}:{listen_port}")
+    print(f"Codex Switcher v{APP_VERSION}: http://{HOST}:{listen_port}")
     print(f"Data: {DB_PATH}")
     try:
         server.serve_forever()
