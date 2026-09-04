@@ -1,0 +1,382 @@
+<!doctype html><html data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Codex 账号切换启动器</title>
+<style>
+:root{font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif;color:#18202b;background:#f5f7fb}*{box-sizing:border-box}body{margin:0;background:linear-gradient(180deg,#f8fafc,#f3f6fa);min-height:100vh}.wrap{max-width:1120px;margin:0 auto;padding:32px 22px 56px}.top{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;margin-bottom:24px}.title{font-size:30px;font-weight:780;letter-spacing:-.03em}.sub{color:#6b7280;margin-top:6px}.iconbtn,.btn{border:1px solid #d8dee8;background:#fff;border-radius:10px;padding:9px 13px;font-weight:650;cursor:pointer;color:#202939}.iconbtn{width:42px;height:42px;font-size:18px;padding:0}.btn:hover,.iconbtn:hover{background:#f8fafc}.btn.primary{background:#111827;color:#fff;border-color:#111827}.btn.danger{color:#b42318;border-color:#efc4bf}.btn.small{padding:6px 9px;font-size:12px}.section{margin-top:22px}.section h2{font-size:15px;margin:0 0 10px;color:#475467}.summary{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,3fr);gap:16px;align-items:stretch}.summary-card,.launcher-card{background:#fff;border:1px solid #e3e8ef;border-radius:16px;box-shadow:0 4px 18px rgba(16,24,40,.045)}.summary-card{padding:20px;border-width:2px;position:relative;overflow:hidden;transition:background .18s ease,border-color .18s ease,box-shadow .18s ease}.summary-card.next-summary{display:flex;flex-direction:column}.summary-card.next-summary .summary-actions{margin-top:auto;padding-top:18px}.summary-card.current-summary{box-shadow:0 8px 26px rgba(16,24,40,.07)}.summary-card.next-summary{box-shadow:0 12px 34px rgba(16,24,40,.10)}.summary-card .summary-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.summary-card .summary-quota{margin-top:16px}.summary-card .summary-countdown{margin-top:14px;padding-top:12px;border-top:1px solid rgba(0,0,0,.07)}.summary-card.next-summary .summary-account{font-size:25px}.summary-card.next-summary .summary-main{font-size:34px}.summary-card .btn.switch{font-size:14px;padding:10px 15px}.eyebrow{font-size:12px;color:#7b8492;font-weight:700;text-transform:uppercase;letter-spacing:.08em}.summary-main{font-size:28px;font-weight:800;margin-top:8px}.summary-account{font-size:18px;font-weight:800;margin-top:4px}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.launcher-card{padding:18px;border-width:2px;background:#fff;min-height:380px;position:relative;display:flex;flex-direction:column}.launcher-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.launcher-id{font-size:19px;font-weight:850;letter-spacing:.03em}.account-name{font-size:23px;font-weight:850;line-height:1.15;margin-top:4px;word-break:break-word}.badges{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px}.badge{font-size:11px;padding:4px 7px;border-radius:999px;background:rgba(255,255,255,.72);border:1px solid rgba(0,0,0,.08);font-weight:700}.field{margin-top:17px}.fieldline{display:flex;justify-content:space-between;gap:12px;align-items:center;font-size:13px;font-weight:700}.muted{color:#727b88;font-weight:500}.quota{display:grid;grid-template-columns:1fr 48px;gap:10px;align-items:center;margin-top:8px}input[type=range]{width:100%;accent-color:var(--accent,#4F7CFF)}.countline,.resetline{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:11px}.pencil{border:0;background:transparent;cursor:pointer;font-size:14px}.count{font-weight:800}.countdown{font-variant-numeric:tabular-nums;font-size:20px;font-weight:800}.nexttime{font-size:12px;color:#667085;margin-top:3px}.select{width:100%;margin-top:8px;border:1px solid rgba(0,0,0,.13);background:rgba(255,255,255,.78);border-radius:9px;padding:8px 10px;font-size:13px;font-weight:700}.actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}.history{background:#fff;border:1px solid #e3e8ef;border-radius:14px;overflow:hidden}.hist{padding:11px 14px;border-top:1px solid #edf1f5;font-size:13px}.hist:first-child{border-top:0}.empty{color:#8a94a3;font-size:13px}.footer{font-size:11px;color:#929aa6;margin-top:20px;display:flex;justify-content:space-between}.overlay{position:fixed;inset:0;background:rgba(15,23,42,.26);display:none;align-items:center;justify-content:center;padding:22px;z-index:30}.overlay.show{display:flex}.modal{background:#fff;border-radius:18px;box-shadow:0 24px 80px rgba(15,23,42,.22);width:min(760px,100%);max-height:88vh;overflow:auto;padding:22px}.modal.narrow{width:min(480px,100%)}.modalhead{display:flex;justify-content:space-between;align-items:center;gap:12px}.modal h3{margin:0;font-size:21px}.modal h4{margin:22px 0 10px;font-size:14px;color:#475467}.formgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.formrow{margin-top:12px}.formrow label{display:block;font-size:12px;color:#667085;font-weight:700;margin-bottom:5px}.input{width:100%;border:1px solid #d6dde7;border-radius:9px;padding:9px 10px;font-size:14px;background:#fff}.manage-row{display:grid;grid-template-columns:44px 1fr auto;gap:10px;align-items:center;padding:10px 0;border-top:1px solid #edf1f5}.manage-row:first-child{border-top:0}.color-chip{width:18px;height:18px;border-radius:50%;border:1px solid rgba(0,0,0,.14);display:inline-block;vertical-align:-3px;margin-right:6px}.confirm-name{font-size:25px;font-weight:850;margin:12px 0 4px}.confirmbox{background:#f7f8fa;border-radius:12px;padding:12px 14px;margin:14px 0;font-size:13px;line-height:1.65}.row-actions{display:flex;gap:7px}.system-note{font-size:11px;color:#667085;margin-top:4px}.palette{display:flex;gap:8px;align-items:center}.palette input[type=color]{width:42px;height:34px;padding:2px;border:1px solid #d6dde7;border-radius:8px;background:#fff}.inlineedit{display:flex;gap:8px;align-items:center}.spacer{flex:1}.metric-label{font-size:13px;font-weight:800}.metric-value,.count{font-size:15px;font-weight:800;line-height:1.2}.countdown{font-variant-numeric:tabular-nums;font-size:15px;font-weight:800}.countline>span:first-child,.fieldline>span:first-child{font-size:13px;font-weight:800}.actions.divided{border-top:1px solid rgba(27,39,54,.12);padding-top:15px;margin-top:auto}.launcher-tools{display:grid;grid-template-rows:0fr;opacity:0;visibility:hidden;overflow:hidden;margin-top:0;padding:0;border-top:0;pointer-events:none;transition:grid-template-rows .22s ease,opacity .16s ease,margin-top .22s ease,padding-bottom .22s ease,visibility 0s linear .22s}.launcher-tools-inner{min-height:0;overflow:hidden;display:flex;flex-wrap:wrap;gap:8px}.launcher-card.edit-visible .launcher-tools{grid-template-rows:1fr;opacity:1;visibility:visible;margin-top:12px;padding-top:0;padding-bottom:10px;border-color:transparent;pointer-events:auto;transition:grid-template-rows .22s ease,opacity .16s ease .03s,margin-top .22s ease,padding-bottom .22s ease,visibility 0s}.launcher-tools+.actions.divided{margin-top:auto}.skills-source-row{display:flex;align-items:center;gap:10px;margin-top:12px}.skills-source-row .skill-source{margin-top:0;flex:1;min-width:0}.weekly-layout{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:end;margin-top:8px}.weekly-layout .quota{margin-top:0;grid-template-columns:1fr 44px}.weekly-reset-box{min-width:118px;text-align:right;padding-left:10px;border-left:1px solid rgba(27,39,54,.10)}.weekly-reset-label{font-size:11px;color:#7a8491;font-weight:650}.weekly-reset-value{margin-top:3px;font-size:13px;font-weight:800;white-space:nowrap}.weekly-reset-value .pencil{margin-left:3px}.account-select-wrap{position:relative;margin-top:8px}.account-select-wrap:after{content:'⌄';position:absolute;right:10px;top:50%;transform:translateY(-54%);font-size:13px;color:#667085;opacity:0;pointer-events:none;transition:opacity .16s ease}.account-select{appearance:none;-webkit-appearance:none;width:100%;border:1px solid transparent;background:transparent;border-radius:9px;padding:7px 28px 7px 2px;font-size:13px;font-weight:750;color:#303846;cursor:pointer;transition:background .16s ease,border-color .16s ease,padding .16s ease}.account-select-wrap:hover .account-select,.account-select:focus{border-color:rgba(0,0,0,.13);background:rgba(255,255,255,.72);padding-left:9px;outline:none}.account-select-wrap:hover:after,.account-select-wrap:focus-within:after{opacity:.8}.status-compact{font-size:15px;font-weight:800}.countline .inlineedit{min-width:74px;justify-content:flex-end}.hover-edit{opacity:0;visibility:hidden;pointer-events:none;transition:opacity .18s ease,visibility .18s ease}.launcher-card.edit-visible .hover-edit,.summary-card.edit-visible .summary-edit{opacity:1;visibility:visible;pointer-events:auto}.summary-edit{opacity:0;visibility:hidden;pointer-events:none;transition:opacity .18s ease,visibility .18s ease}.launcher-card .account-select-wrap:after{opacity:0}.launcher-card .account-select{border-color:transparent;background:transparent;padding-left:2px;cursor:default}.launcher-card.edit-visible .account-select{border-color:rgba(0,0,0,.13);background:rgba(255,255,255,.72);padding-left:9px;cursor:pointer}.launcher-card.edit-visible .account-select-wrap:after{opacity:.8}.account-title-line{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px}.account-title-line .account-name{margin-top:0}.current-badge{font-size:11px;padding:4px 8px;border-radius:999px;border:1px solid currentColor;background:rgba(255,255,255,.78);font-weight:850;white-space:nowrap}.membership-badge{font-size:11px;padding:4px 8px;border-radius:999px;border:1px solid rgba(76,86,102,.28);background:rgba(255,255,255,.62);font-weight:800;white-space:nowrap;color:#566170}.launcher-card .actions.divided .always-action{opacity:1;visibility:visible;pointer-events:auto}.weekly-reset-value .pencil.hover-edit,.countline .pencil.hover-edit{display:none}.launcher-card.edit-visible .weekly-reset-value .pencil.hover-edit,.launcher-card.edit-visible .countline .pencil.hover-edit{display:inline-block}.summary-card .weekly-reset-value .summary-edit{display:none}.summary-card.edit-visible .weekly-reset-value .summary-edit{display:inline-block}
+/* v0.9.5 launcher-card hierarchy and stable hover layout */
+.launcher-card{min-height:380px}
+.launcher-head{align-items:center}
+.launcher-heading{min-width:0;flex:1}
+.launcher-meta-line{display:flex;align-items:center;gap:8px;min-height:22px;margin-bottom:4px}
+.launcher-id{font-size:12px;font-weight:800;letter-spacing:.08em;opacity:.48;color:var(--accent);line-height:1}
+.system-inline{font-size:11px;font-weight:700;opacity:.60;color:var(--accent);white-space:nowrap}
+.launcher-card .account-title-line{margin-top:0;min-height:34px;position:relative;display:flex;align-items:center;gap:8px;flex-wrap:nowrap}
+.title-account-wrap{position:relative;min-width:0;max-width:100%;display:inline-flex;align-items:center}
+.title-account-select{appearance:none;-webkit-appearance:none;border:1px solid transparent;background:transparent;border-radius:9px;padding:2px 24px 2px 0;font-size:23px;font-weight:850;line-height:1.15;color:inherit;max-width:100%;min-width:72px;cursor:default;text-overflow:ellipsis;transition:background .16s ease,border-color .16s ease,padding .16s ease}
+.title-account-wrap:after{content:'⌄';position:absolute;right:7px;top:50%;transform:translateY(-55%);font-size:13px;opacity:0;pointer-events:none;transition:opacity .16s ease}
+.launcher-card.edit-visible .title-account-select{cursor:pointer;border-color:rgba(0,0,0,.13);background:rgba(255,255,255,.45);padding-left:7px}
+.launcher-card.edit-visible .title-account-wrap:after{opacity:.72}
+.launcher-card .metrics-stack{display:grid;grid-template-rows:104px 104px 72px;margin-top:8px}
+.launcher-card .metric-row{margin:0;padding:15px 0;border-top:1px solid rgba(27,39,54,.08);min-height:0;position:relative;display:flex;flex-direction:column;justify-content:flex-start}
+.launcher-card .metric-row:first-child{border-top:0}
+.launcher-card .metric-row.count-row{justify-content:center}
+.launcher-card .resetline{min-height:30px;margin-top:8px}
+.launcher-card .countline{margin-top:0}
+.launcher-card .weekly-reset-value .pencil.hover-edit,.launcher-card .countline .pencil.hover-edit{display:inline-block;opacity:0;visibility:hidden;pointer-events:none;width:22px;margin-left:3px}
+.launcher-card.edit-visible .weekly-reset-value .pencil.hover-edit,.launcher-card.edit-visible .countline .pencil.hover-edit{opacity:1;visibility:visible;pointer-events:auto}
+.launcher-card .actions.divided{margin-top:auto}
+html[data-theme="dark"] .launcher-card.edit-visible .title-account-select{background:rgba(16,23,32,.55);border-color:rgba(255,255,255,.17)}
+@media(max-width:900px){.grid{grid-template-columns:1fr}.summary{grid-template-columns:1fr}.launcher-card{min-height:auto}}@media(max-width:600px){.wrap{padding:22px 14px 40px}.formgrid{grid-template-columns:1fr}.title{font-size:25px}}
+
+/* v0.9.6 natural metric rhythm + animated edit expansion */
+.grid{align-items:start}
+.launcher-card{min-height:380px;transition:min-height .24s ease,box-shadow .18s ease}
+.launcher-card .metrics-stack{display:flex;flex-direction:column;gap:18px;margin-top:18px}
+.launcher-card .metric-row{margin:0;padding:0;border:0;min-height:0;display:block}
+.launcher-card .metric-row:first-child{border-top:0}
+.launcher-card .metric-row.count-row{display:block}
+.launcher-card .fieldline,.launcher-card .countline{margin:0;min-height:22px}
+.launcher-card .weekly-layout{margin-top:8px}
+.launcher-card .resetline{margin-top:0;min-height:0;max-height:0;opacity:0;visibility:hidden;overflow:hidden;transform:translateY(-4px);pointer-events:none;transition:max-height .24s ease,margin-top .24s ease,opacity .16s ease,transform .24s ease,visibility 0s linear .24s}
+.launcher-card.edit-visible .resetline{max-height:42px;margin-top:8px;opacity:1;visibility:visible;transform:translateY(0);pointer-events:auto;transition:max-height .24s ease,margin-top .24s ease,opacity .18s ease .04s,transform .24s ease,visibility 0s}
+.launcher-card .weekly-reset-value .pencil.hover-edit,.launcher-card .countline .pencil.hover-edit{display:inline-block;width:auto;max-width:0;margin-left:0;padding-left:0;padding-right:0;opacity:0;visibility:hidden;overflow:hidden;pointer-events:none;transform:translateX(-3px);transition:max-width .20s ease,margin-left .20s ease,padding .20s ease,opacity .14s ease,transform .20s ease,visibility 0s linear .20s}
+.launcher-card.edit-visible .weekly-reset-value .pencil.hover-edit,.launcher-card.edit-visible .countline .pencil.hover-edit{max-width:28px;margin-left:3px;padding-left:2px;padding-right:2px;opacity:1;visibility:visible;pointer-events:auto;transform:translateX(0);transition:max-width .20s ease,margin-left .20s ease,padding .20s ease,opacity .16s ease .03s,transform .20s ease,visibility 0s}
+.launcher-card .actions.divided{margin-top:22px}
+@media(max-width:900px){.grid{align-items:stretch}.launcher-card{min-height:auto}}
+
+/* v0.9.4 appearance themes */
+html[data-theme="dark"]{color-scheme:dark}
+html[data-theme="dark"] body{background:linear-gradient(180deg,#0f141b,#0b1016);color:#e8edf3}
+html[data-theme="dark"] .sub,html[data-theme="dark"] .muted,html[data-theme="dark"] .system-note,html[data-theme="dark"] .nexttime,html[data-theme="dark"] .weekly-reset-label,html[data-theme="dark"] .footer{color:#98a4b3}
+html[data-theme="dark"] .section h2,html[data-theme="dark"] .modal h4{color:#b7c0cc}
+html[data-theme="dark"] .summary-card,html[data-theme="dark"] .launcher-card,html[data-theme="dark"] .history{box-shadow:0 8px 28px rgba(0,0,0,.22)}
+html[data-theme="dark"] .history,html[data-theme="dark"] .modal{background:#171d25;border-color:#2a3441}
+html[data-theme="dark"] .hist,html[data-theme="dark"] .manage-row{border-color:#28313d}
+html[data-theme="dark"] .btn,html[data-theme="dark"] .iconbtn{background:#1c2430;border-color:#344050;color:#e8edf3}
+html[data-theme="dark"] .btn:hover,html[data-theme="dark"] .iconbtn:hover{background:#263140}
+html[data-theme="dark"] .btn.primary{background:#eef2f7;color:#111820;border-color:#eef2f7}
+html[data-theme="dark"] .btn.danger{color:#ffaaa2;border-color:#69413f}
+html[data-theme="dark"] .input,html[data-theme="dark"] .select{background:#111821;border-color:#344050;color:#e8edf3}
+html[data-theme="dark"] .account-select{color:#e4eaf1}
+html[data-theme="dark"] .launcher-card.edit-visible .account-select,html[data-theme="dark"] .account-select-wrap:hover .account-select,html[data-theme="dark"] .account-select:focus{background:rgba(16,23,32,.72);border-color:rgba(255,255,255,.18)}
+html[data-theme="dark"] .badge,html[data-theme="dark"] .current-badge{background:rgba(10,15,21,.62);border-color:rgba(255,255,255,.16)}
+html[data-theme="dark"] .confirmbox{background:#111821}
+html[data-theme="dark"] .overlay{background:rgba(0,0,0,.58)}
+html[data-theme="dark"] .actions.divided,html[data-theme="dark"] .summary-card .summary-countdown,html[data-theme="dark"] .launcher-tools{border-color:rgba(255,255,255,.13)}
+html[data-theme="dark"] .weekly-reset-box{border-color:rgba(255,255,255,.12)}
+html[data-theme="dark"] .palette input[type=color]{background:#111821;border-color:#344050}
+.top-actions{display:flex;gap:8px;align-items:center}
+.theme-icon{font-size:17px;line-height:1}
+
+
+/* v0.9.7 visual hierarchy, button palette, and reversible hover layout */
+.summary-launcher-id{
+  font-size:13px!important;
+  line-height:1;
+  font-weight:800!important;
+  letter-spacing:.10em;
+  opacity:.46;
+  color:var(--accent,#7f8a98);
+  margin-top:10px!important;
+}
+.summary-card.next-summary .summary-launcher-id{font-size:13px!important}
+
+/* Settings are grouped as independent, scannable regions. */
+.settings-section{
+  margin-top:16px;
+  padding:15px 16px;
+  border:1px solid #dce3ec;
+  border-radius:14px;
+  background:rgba(248,250,252,.66);
+}
+.settings-section:first-of-type{margin-top:18px}
+.settings-section-title{font-size:13px;font-weight:850;color:#475467;letter-spacing:.01em}
+.settings-section-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:5px}
+.settings-section-actions{margin-top:11px;padding-top:11px;border-top:1px solid rgba(50,65,85,.09)}
+.settings-formrow{margin-top:9px}
+.settings-path{padding-top:12px;padding-bottom:12px}
+.settings-section .manage-row{padding:11px 0}
+.settings-section .manage-row:first-child{border-top:0}
+
+/* Button system: borders sit between panel fill and accent border; fills stay restrained. */
+.btn,.iconbtn{
+  border-color:#bec8d5;
+  background:#f3f6f9;
+  color:#263240;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.34);
+  transition:background .16s ease,border-color .16s ease,color .16s ease,transform .12s ease;
+}
+.btn:hover,.iconbtn:hover{background:#e9eef4;border-color:#aebac8}
+.btn:active,.iconbtn:active{transform:translateY(1px)}
+.btn.primary{
+  background:#b9c4d1;
+  border-color:#aab6c4;
+  color:#17202b;
+}
+.btn.primary:hover{background:#adb9c7;border-color:#9eabb9}
+.btn.danger{background:#f5eeed;border-color:#d8aaa5;color:#9d3027}
+.btn.danger:hover{background:#efdfdd;border-color:#c98d87}
+
+/* Colored panels get local button colors derived from the launcher's accent. */
+.launcher-card .btn,.summary-card .btn{
+  border-color:color-mix(in srgb,var(--accent) 42%,#8e9aaa 58%);
+  background:color-mix(in srgb,var(--accent) 7%,transparent);
+}
+.launcher-card .btn:hover,.summary-card .btn:hover{
+  border-color:color-mix(in srgb,var(--accent) 54%,#8e9aaa 46%);
+  background:color-mix(in srgb,var(--accent) 13%,transparent);
+}
+.launcher-card .btn.primary,.summary-card .btn.primary{
+  border-color:color-mix(in srgb,var(--accent) 64%,#718093 36%);
+  background:color-mix(in srgb,var(--accent) 34%,#d6dde6 66%);
+  color:#17202a;
+}
+.launcher-card .btn.primary:hover,.summary-card .btn.primary:hover{
+  background:color-mix(in srgb,var(--accent) 42%,#c9d2dd 58%);
+}
+
+/* Account title editing must not change the inline footprint of Class/current badges. */
+.launcher-card .account-title-line{min-height:34px}
+.title-account-wrap{position:relative;min-width:0;flex:0 1 auto}
+.title-account-select{
+  padding:2px 24px 2px 0!important;
+  border-width:1px;
+  box-sizing:border-box;
+  transition:background .18s ease,border-color .18s ease,opacity .18s ease!important;
+}
+.launcher-card.edit-visible .title-account-select{padding:2px 24px 2px 0!important}
+.title-account-wrap:after{right:7px}
+
+/* Default rhythm is compact. Editing expands only the real extra controls, then fully collapses. */
+.launcher-card{
+  min-height:380px;
+  height:auto;
+  overflow:hidden;
+  transition:box-shadow .18s ease,background .18s ease,border-color .18s ease;
+}
+.launcher-card .metrics-stack{gap:18px}
+.launcher-card .resetline{
+  display:grid;
+  grid-template-rows:0fr;
+  max-height:none!important;
+  margin-top:0!important;
+  opacity:0;
+  visibility:hidden;
+  transform:none!important;
+  overflow:hidden;
+  pointer-events:none;
+  transition:grid-template-rows .24s ease,margin-top .24s ease,opacity .16s ease,visibility 0s linear .24s!important;
+}
+.launcher-card .resetline>.row-actions{min-height:0;overflow:hidden}
+.launcher-card.edit-visible .resetline{
+  grid-template-rows:1fr;
+  margin-top:8px!important;
+  opacity:1;
+  visibility:visible;
+  pointer-events:auto;
+  transition:grid-template-rows .24s ease,margin-top .24s ease,opacity .18s ease .03s,visibility 0s!important;
+}
+/* Hidden action buttons in the bottom row keep no surprise vertical growth. */
+.launcher-card .actions.divided{min-height:39px;align-items:center;margin-top:auto}
+.launcher-card .actions.divided .hover-edit{position:relative}
+
+html[data-theme="dark"] .settings-section{border-color:#303b49;background:rgba(21,28,37,.62)}
+html[data-theme="dark"] .settings-section-title{color:#c3ccd7}
+html[data-theme="dark"] .settings-section-actions{border-color:rgba(255,255,255,.09)}
+html[data-theme="dark"] .btn,html[data-theme="dark"] .iconbtn{
+  background:#1b232d;
+  border-color:#3b4857;
+  color:#e3e9f0;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.035);
+}
+html[data-theme="dark"] .btn:hover,html[data-theme="dark"] .iconbtn:hover{background:#242e3a;border-color:#4a596a}
+html[data-theme="dark"] .btn.primary{
+  background:#354250;
+  border-color:#465566;
+  color:#f0f4f8;
+}
+html[data-theme="dark"] .btn.primary:hover{background:#3d4b5b;border-color:#536377}
+html[data-theme="dark"] .btn.danger{background:#2a2022;border-color:#704742;color:#ffaaa2}
+html[data-theme="dark"] .btn.danger:hover{background:#342528;border-color:#85514b}
+html[data-theme="dark"] .launcher-card .btn,html[data-theme="dark"] .summary-card .btn{
+  color:#e9eef4;
+  border-color:color-mix(in srgb,var(--accent) 38%,#34404e 62%);
+  background:color-mix(in srgb,var(--accent) 8%,#171e27 92%);
+}
+html[data-theme="dark"] .launcher-card .btn:hover,html[data-theme="dark"] .summary-card .btn:hover{
+  border-color:color-mix(in srgb,var(--accent) 51%,#3a4655 49%);
+  background:color-mix(in srgb,var(--accent) 15%,#19212b 85%);
+}
+html[data-theme="dark"] .launcher-card .btn.primary,html[data-theme="dark"] .summary-card .btn.primary{
+  color:#f2f5f8;
+  border-color:color-mix(in srgb,var(--accent) 58%,#4b5867 42%);
+  background:color-mix(in srgb,var(--accent) 28%,#26313e 72%);
+}
+html[data-theme="dark"] .launcher-card .btn.primary:hover,html[data-theme="dark"] .summary-card .btn.primary:hover{
+  background:color-mix(in srgb,var(--accent) 36%,#293542 64%);
+}
+
+/* v0.9.8 summary header alignment and 40/60 split */
+.summary{grid-template-columns:minmax(0,2fr) minmax(0,3fr)}
+.summary-topline{display:flex;align-items:center;gap:9px;min-height:24px}
+.summary-topline .summary-launcher-id{margin:0!important;flex:0 0 auto}
+.summary-topline .eyebrow{margin:0;flex:0 1 auto}
+.summary-topline .current-badge{margin-left:auto}
+.summary-accountline{display:flex;align-items:center;gap:10px;margin-top:10px;min-width:0}
+.summary-accountline .summary-account{margin-top:0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.summary-accountline .membership-badge{margin-left:auto;flex:0 0 auto}
+.summary-card.next-summary .summary-accountline .summary-account{font-size:25px}
+.summary-card .summary-launcher-id{font-size:12px!important;opacity:.42}
+@media(max-width:900px){.summary{grid-template-columns:1fr}}
+
+
+/* v0.9.9: summary stays compact/read-only; launcher cards own fixed badge alignment */
+.summary-accountline{justify-content:flex-start}
+.summary-accountline .membership-badge{margin-left:0;flex:0 0 auto}
+.launcher-meta-line{width:100%}
+.launcher-meta-line .current-badge{margin-left:auto;flex:0 0 auto}
+.launcher-card .account-title-line{width:100%}
+.launcher-card .account-title-line .membership-badge{margin-left:auto;flex:0 0 auto}
+
+/* v0.10.0 global actions */
+.global-actions{display:flex;gap:8px;align-items:center;margin-right:2px}
+.global-actions .btn{white-space:nowrap;padding:9px 12px;font-size:12px}
+.global-actions .quota-global{border-color:color-mix(in srgb,var(--accent,#76D5CF) 52%,var(--panel-border,#667085));}
+.global-actions .card-global{border-style:dashed}
+@media(max-width:760px){.top{align-items:flex-start}.top-actions{flex-wrap:wrap;justify-content:flex-end}.global-actions{order:2;width:100%;justify-content:flex-end}.global-actions .btn{padding:7px 9px}}
+
+/* v0.11.0 read-only workspace viewer */
+.workspace-list{display:grid;gap:12px;margin-top:18px}.workspace-project{border:1px solid var(--panel-border,#d8dee8);border-radius:13px;padding:14px;background:color-mix(in srgb,var(--panel-bg,#fff) 94%,transparent)}.workspace-project-name{font-size:16px;font-weight:850}.workspace-roots{display:grid;gap:7px;margin-top:10px}.workspace-root{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px;align-items:start;font-size:13px}.workspace-root-label{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;opacity:.58;padding-top:2px}.workspace-path{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere}.workspace-meta{font-size:11px;opacity:.58;margin-top:10px}.workspace-source{margin-top:16px;overflow-wrap:anywhere}.workspace-empty{padding:28px 10px;text-align:center;color:#7b8492}html[data-theme="dark"] .workspace-project{background:#111821;border-color:#303b49;color:#e8edf3}html[data-theme="dark"] .workspace-root-label,html[data-theme="dark"] .workspace-meta,html[data-theme="dark"] .workspace-empty,html[data-theme="dark"] .workspace-source{color:#98a4b3}html[data-theme="dark"] .workspace-path{color:#dce5ee}
+
+.skill-list{display:grid;gap:12px;margin-top:18px}.skill-item{border:1px solid rgba(50,65,85,.11);border-radius:12px;padding:12px 14px;background:rgba(255,255,255,.46)}.skill-name{font-size:14px;font-weight:850}.skill-meta{font-size:11px;color:#7b8492;margin-top:4px;word-break:break-all}.skill-tools{margin-top:16px;padding-top:14px;border-top:1px solid rgba(50,65,85,.10);display:grid;gap:10px}.skill-copy-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:end}.skill-copy-row label{display:block;font-size:11px;font-weight:750;color:#7b8492;margin-bottom:5px}.skill-result{font-size:12px;color:#667085;line-height:1.6}.skill-readonly{font-size:11px;color:#7b8492;margin-top:12px}.skill-empty{padding:22px 0;color:#8a94a3;font-size:13px}.skill-pill{display:inline-flex;align-items:center;border:1px solid rgba(76,86,102,.22);border-radius:999px;padding:3px 7px;font-size:10px;font-weight:800;margin-left:6px}.skill-source{word-break:break-all;margin-top:12px}html[data-theme="dark"] .skill-item{border-color:rgba(255,255,255,.09);background:rgba(255,255,255,.035)}html[data-theme="dark"] .skill-tools{border-color:rgba(255,255,255,.09)}html[data-theme="dark"] .skill-meta,html[data-theme="dark"] .skill-readonly,html[data-theme="dark"] .skill-copy-row label{color:#8e99a8}
+
+/* v0.14.0: empty current summary follows dark appearance instead of falling back to white. */
+html[data-theme="dark"] .summary-card.current-summary:not([style]){background:#111821;border-color:#303b49;color:#e8edf3}
+html[data-theme="dark"] .summary-card.current-summary:not([style]) .empty,html[data-theme="dark"] .summary-card.current-summary:not([style]) .eyebrow{color:#98a4b3}
+
+
+/* v0.14.1: unify weekly-reset layout in the suggested-next summary. */
+.summary-card.next-summary .next-quota-block{margin-top:16px}
+.summary-card.next-summary .next-quota-block>.fieldline{margin-bottom:0}
+.summary-card.next-summary .next-weekly-layout{margin-top:12px;align-items:end}
+.summary-progress-wrap{min-width:0}
+.summary-progress{height:7px;border-radius:999px;background:rgba(255,255,255,.68);overflow:hidden;border:1px solid rgba(0,0,0,.06)}
+.summary-card.next-summary .next-fivehour-line{margin-top:14px}
+html[data-theme="dark"] .summary-progress{background:rgba(255,255,255,.10);border-color:rgba(255,255,255,.10)}
+
+</style></head><body><div class="wrap">
+<div class="top"><div><div class="title" id="title">Codex 账号切换启动器</div><div class="sub" id="subtitle">启动台与账号解绑，本地记录当前状态与额度</div></div><div class="top-actions"><div class="global-actions"><button class="btn quota-global" onclick="openGlobalConfirm('quota')" data-i18n="globalQuotaReset">全局额度重置</button><button class="btn card-global" onclick="openGlobalConfirm('card')" data-i18n="globalResetCard">全局重置卡</button></div><button class="iconbtn theme-icon" id="themeToggle" onclick="toggleAppearance()" aria-label="切换明暗模式" title="切换明暗模式">☀︎</button><button class="iconbtn" onclick="openSettings()">⚙︎</button></div></div>
+<div class="summary"><div class="summary-card" id="currentBox"></div><div class="summary-card" id="nextBox"></div></div>
+<div class="section"><h2 data-i18n="launchers">启动台</h2><div class="grid" id="launchers"></div></div>
+<div class="section"><h2 data-i18n="recent">最近切换</h2><div class="history" id="history"></div></div>
+<div class="footer"><span id="footer"></span><span id="version"></span></div>
+</div>
+
+<div class="overlay" id="settings"><div class="modal"><div class="modalhead"><div><h3 data-i18n="settings">设置</h3><div class="muted" data-i18n="settingsSub">语言、账号助记符和启动台管理</div></div><button class="iconbtn" onclick="closeSettings()">×</button></div>
+<div class="settings-section"><div class="settings-section-title" data-i18n="language">语言</div><div class="formrow settings-formrow"><select class="input" id="lang" onchange="saveLanguage(this.value)"><option value="zh-CN">简体中文</option><option value="en">English</option></select></div></div>
+<div class="settings-section"><div class="settings-section-head"><div class="settings-section-title" data-i18n="accountManage">账户助记符</div></div><div id="accountManage"></div><div class="settings-section-actions"><button class="btn small" onclick="editAccount()" data-i18n="addAccount">+ 新增账户助记符</button></div></div>
+<div class="settings-section"><div class="settings-section-head"><div class="settings-section-title" data-i18n="launcherManage">启动台管理</div></div><div id="launcherManage"></div><div class="settings-section-actions"><button class="btn small" id="addLauncherBtn" onclick="addLauncher()" data-i18n="addLauncher">+ 新增启动台</button></div></div>
+<div class="settings-section"><div class="settings-section-head"><div class="settings-section-title" data-i18n="portSetting">服务端口</div></div><div class="formrow settings-formrow"><label data-i18n="portLabel">本地端口</label><div class="inlineedit"><input class="input" id="portInput" type="number" min="1024" max="65535" value="17831"><button class="btn small" onclick="savePort()" data-i18n="savePort">保存端口</button></div><div class="system-note" id="portHint" data-i18n="portHint">默认 17831。修改后需要重启启动器服务才能切换到新端口。</div></div></div>
+<div class="settings-section settings-path"><div class="system-note" id="dataPath"></div></div></div></div>
+
+<div class="overlay" id="launcherEditor"><div class="modal narrow"><div class="modalhead"><h3 id="launcherEditorTitle"></h3><button class="iconbtn" onclick="closeLauncherEditor()">×</button></div>
+<input type="hidden" id="lid"><div class="formrow"><label data-i18n="boundAccount">绑定账户助记符</label><select class="input" id="laccount"></select></div>
+<div class="formrow"><label data-i18n="themeColor">主题色</label><div class="palette"><input type="color" id="lcolor"><span id="lcolorText"></span></div></div>
+<div id="isolated"><div class="formrow"><label>CODEX_HOME</label><input class="input" id="lhome"></div><div class="formrow"><label>Desktop data directory</label><input class="input" id="ldata"></div></div>
+<div class="system-note" id="aRule"></div><div class="actions"><button class="btn primary" onclick="saveLauncher()" data-i18n="save">保存</button><button class="btn" onclick="closeLauncherEditor()" data-i18n="cancel">取消</button></div></div></div>
+
+<div class="overlay" id="accountEditor"><div class="modal narrow"><div class="modalhead"><h3 id="accountEditorTitle"></h3><button class="iconbtn" onclick="closeAccountEditor()">×</button></div><input type="hidden" id="aid"><div class="formrow"><label data-i18n="mnemonic">账户助记符</label><input class="input" id="aname"></div><div class="formrow"><label data-i18n="userType">用户类型</label><select class="input" id="atype"><option>Plus</option><option>Pro X10</option><option>Pro X20</option><option>Ultra</option></select></div><div class="formrow"><label data-i18n="resetCount">可重置次数</label><input class="input" type="number" min="0" step="1" id="aresets"></div><div class="actions"><button class="btn primary" onclick="saveAccount()" data-i18n="save">保存</button><button class="btn" onclick="closeAccountEditor()" data-i18n="cancel">取消</button></div></div></div>
+
+<div class="overlay" id="resetConfirm"><div class="modal narrow"><div class="modalhead"><h3 data-i18n="confirmReset">确认重置额度</h3><button class="iconbtn" onclick="closeResetConfirm()">×</button></div><div class="muted" data-i18n="confirmResetHint">请确认你正在重置正确的账号。</div><div class="confirm-name" id="resetName"></div><div class="confirmbox" data-i18n="resetEffect">周剩余将恢复到 100%，5 小时倒计时将清除并恢复为可用。</div><div class="actions"><button class="btn danger" onclick="performResetAll(false)" data-i18n="confirm">确认重置</button><button class="btn primary" id="consumeResetBtn" onclick="performResetAll(true)" data-i18n="consumeReset">消耗 1 次重置次数并重置</button><button class="btn" onclick="closeResetConfirm()" data-i18n="cancel">取消</button></div><div class="system-note" id="consumeResetHint"></div></div></div>
+
+
+<div class="overlay" id="globalConfirm"><div class="modal narrow"><div class="modalhead"><h3 id="globalConfirmTitle"></h3><button class="iconbtn" onclick="closeGlobalConfirm()">×</button></div><div class="muted" id="globalConfirmSubtitle"></div><div class="confirmbox" id="globalConfirmEffect"></div><div class="actions"><button class="btn danger" id="globalConfirmButton" onclick="performGlobalAction()"></button><button class="btn" onclick="closeGlobalConfirm()" data-i18n="cancel">取消</button></div></div></div>
+
+<div class="overlay" id="customTime"><div class="modal narrow"><div class="modalhead"><h3 data-i18n="customResetTime">自定义下次重置时间</h3><button class="iconbtn" onclick="closeCustomTime()">×</button></div><div class="muted" id="customTimeAccount"></div><div class="formgrid"><div class="formrow"><label data-i18n="hour">小时</label><input class="input" id="customHour" type="number" min="0" max="23" step="1" inputmode="numeric" placeholder="HH"></div><div class="formrow"><label data-i18n="minute">分钟</label><input class="input" id="customMinute" type="number" min="0" max="59" step="1" inputmode="numeric" placeholder="MM"></div></div><div class="system-note" style="margin-top:12px" data-i18n="customTimeHint">输入本地时间 HH:MM。若时间已经经过，将按次日计算；目标必须在未来 5 小时内。</div><div class="actions"><button class="btn primary" onclick="saveCustomTime()" data-i18n="confirm">确认</button><button class="btn" onclick="closeCustomTime()" data-i18n="cancel">取消</button></div></div></div>
+<div class="overlay" id="weeklyResetEditor"><div class="modal narrow"><div class="modalhead"><h3 data-i18n="weeklyResetEditorTitle">设置周重置时间</h3><button class="iconbtn" onclick="closeWeeklyResetEditor()">×</button></div><div class="muted" id="weeklyResetAccount"></div><div class="formrow"><label data-i18n="weeklyResetAt">下次周重置时间</label><input class="input" id="weeklyResetInput" type="datetime-local" step="3600"></div><div class="system-note" style="margin-top:12px" data-i18n="weeklyResetHint">时间按当前设备本地时区输入，并以时间戳保存。</div><div class="actions"><button class="btn primary" onclick="saveWeeklyReset()" data-i18n="save">保存</button><button class="btn" onclick="closeWeeklyResetEditor()" data-i18n="cancel">取消</button></div></div></div>
+
+<div class="overlay" id="workspaceViewer"><div class="modal"><div class="modalhead"><div><h3 id="workspaceTitle">工作区</h3><div class="muted" id="workspaceSubtitle"></div></div><button class="iconbtn" onclick="closeWorkspaceViewer()">×</button></div><div id="workspaceBody" class="workspace-list"></div><div class="system-note workspace-source" id="workspaceSource"></div><div class="actions"><button class="btn" onclick="closeWorkspaceViewer()" data-i18n="closeViewer">关闭</button></div></div></div>
+
+
+<div class="overlay" id="skillsViewer"><div class="modal"><div class="modalhead"><div><h3 id="skillsTitle">Skills</h3><div class="muted" id="skillsSubtitle"></div></div><button class="iconbtn" onclick="closeSkillsViewer()">×</button></div><div id="skillsBody" class="skill-list"></div><div class="skills-source-row"><div class="system-note skill-source" id="skillsSource"></div><button class="btn small" id="skillsOpenDirBtn" onclick="openSkillsDirectory()" data-i18n="openDirectory">打开当前目录</button></div><div class="skill-tools"><div class="skill-copy-row"><div><label data-i18n="copyFromLauncher">从其他启动台复制缺失 Skills</label><select class="input" id="skillsCopySource"></select></div><button class="btn primary" id="skillsCopyBtn" onclick="copySkillsToViewed()" data-i18n="copyMissingSkills">复制缺失 Skills</button></div><div class="skill-result" id="skillsResult"></div></div><div class="actions"><button class="btn" onclick="closeSkillsViewer()" data-i18n="closeViewer">关闭</button></div></div></div>
+
+<script>
+const I18N={
+'zh-CN':{title:'Codex 账号切换启动器',subtitle:'启动台与账号解绑，本地记录当前状态与额度',launchers:'启动台',recent:'最近切换',settings:'设置',settingsSub:'语言、账号助记符和启动台管理',appearanceDark:'切换到明亮模式',appearanceLight:'切换到黑暗模式',language:'语言',accountManage:'账户助记符',launcherManage:'启动台管理',addAccount:'+ 新增账户助记符',addLauncher:'+ 新增启动台',boundAccount:'登录账户',themeColor:'主题色',save:'保存',cancel:'取消',mnemonic:'账户助记符',userType:'用户类型',weeklyRemaining:'周剩余',resetCount:'可重置次数',confirmReset:'确认重置额度',confirmResetHint:'请确认你正在重置正确的账号。',resetEffect:'周剩余将恢复到 100%，5 小时倒计时将清除并恢复为可用。',consumeReset:'消耗 1 次重置次数并重置',consumeResetHint:'当前可重置次数：{count} 次。使用此方式会在完成额度重置后扣除 1 次。',confirm:'确认重置',currentLauncher:'当前启动台',currentAccount:'当前记录账号',nextLauncher:'建议下一个',noAccount:'未绑定账号',noNext:'暂无可用的下一启动台',systemDefault:'系统默认 · 原始启动',current:'当前',launch:'启动',markCurrent:'设为当前',fiveHour:'5 小时重置',startFiveHour:'开始 5 小时重置',restartFiveHour:'重新5小时重置',available:'可用',nextReset:'下次重置',resetAll:'重置额度',edit:'编辑',delete:'删除',noHistory:'暂无切换记录',manual:'手动校准',launched:'启动',newAccount:'新增账户助记符',editAccount:'编辑账户助记符',newLauncher:'新增启动台',editLauncher:'编辑启动台 {id}',deleteAccountConfirm:'删除账户助记符“{name}”？所有绑定它的启动台都会变为未绑定。',deleteLauncherConfirm:'删除启动台 {id}？不会删除其 CODEX_HOME 或 Desktop 数据目录。',aRule:'A 是永久系统默认启动台，只使用官方原始启动方式，不附加 CODEX_HOME 或 --user-data-dir。',dataPath:'本地数据：{path}',footer:'“当前”仅表示本启动器最后启动或手动标记的启动台，不验证 OpenAI 真实登录身份。',editCount:'修改“{name}”的可重置次数',error:'操作失败：{msg}',selectAccount:'选择账号',confirmLaunch:'确认启动 {id}？\n\n登录账户：{account}\n\n将先优雅关闭当前 ChatGPT，再启动该启动台。',confirmClose:'确认关闭当前启动台 {id}？\n\n登录账户：{account}\n\nChatGPT 将被优雅关闭。',confirmRestartFive:'“{account}”当前正在进行 5 小时重置倒计时。\n\n确认要重新开始 5 小时重置吗？现有倒计时将被覆盖。',maxReached:'最多支持 3 个启动台。',customResetTime:'自定义下次重置时间',customTimeButton:'自定义时间',hour:'小时',minute:'分钟',customTimeHint:'输入本地时间 HH:MM。若时间已经经过，将按次日计算；目标必须在未来 5 小时内。',invalidTime:'时间无效，请输入 00:00–23:59。',customTimeTooFar:'该时间不在未来 5 小时内，请检查是否填写错误。原有倒计时未改变。',close:'关闭',noCurrent:'当前没有已标记的启动台',closeFailed:'关闭失败：{msg}',switchAndLaunch:'切换并启动 {id}',confirmSwitch:'确认切换启动台？\n\n当前：{current} · {currentAccount}\n目标：{next} · {nextAccount}\n\n将先优雅关闭当前 ChatGPT，再启动目标启动台。',weeklyValue:'周剩余 {value}%',fiveHourStatus:'5 小时状态',weeklyResetAt:'下次周重置时间',weeklyResetShort:'下次周重置',weeklyResetEditorTitle:'设置周重置时间',weeklyResetHint:'时间按当前设备本地时区输入，并以时间戳保存。',globalQuotaReset:'全局额度重置',globalResetCard:'全局重置卡',globalQuotaTitle:'确认全局额度重置',globalQuotaSubtitle:'这会影响所有已记录账户，而不是单个启动台。',globalQuotaEffect:'所有账户的周剩余都会恢复为 100%，正在进行的 5 小时重置倒计时会被清除并恢复为可用。周重置时间和可重置次数不会改变。',globalQuotaConfirm:'确认全局额度重置',globalCardTitle:'确认全局重置卡',globalCardSubtitle:'这会为所有已记录账户增加一次可重置次数。',globalCardEffect:'每个账户的可重置次数都会 +1。周剩余、5 小时重置状态和周重置时间都不会改变。',globalCardConfirm:'确认发放全局重置卡',timesUnit:'次',viewWorkspaces:'查看工作区',workspaceTitle:'启动台 {id} 工作区',workspaceSubtitle:'只读读取 Codex 本地工作区配置',workspaceEmpty:'没有找到已保存的本地工作区。',workspacePrimary:'主目录',workspaceAdditional:'附加目录',workspaceUpdated:'更新',workspaceSource:'数据来源：{path} · 只读',workspaceMissing:'没有找到工作区状态文件：{path}',closeViewer:'关闭',workspaceLoadError:'读取工作区失败：{msg}',viewSkills:'查看 Skills',skillsTitle:'启动台 {id} Skills',skillsSubtitle:'用户级 Skills · 只读取/复制 $CODEX_HOME/skills，自动排除 .system',skillsEmpty:'没有找到用户级 Skills。',skillsSource:'目录：{path}',skillsFiles:'{count} 个文件',copyFromLauncher:'从其他启动台复制缺失 Skills',copyMissingSkills:'复制缺失 Skills',skillsCopyConfirm:'确认从启动台 {source} 复制缺失 Skills 到启动台 {target}？\n\n只复制包含 SKILL.md 的用户级 Skill 目录；跳过 .system；目标已有同名 Skill 不会覆盖；不会复制认证、工作区或其他 Codex 状态。',skillsCopyDone:'已复制 {copied} 个，跳过 {skipped} 个。',skillsCopyNone:'没有需要复制的缺失 Skill。',skillsLoadError:'读取 Skills 失败：{msg}',skillsNoOtherLauncher:'没有其他启动台可作为来源。',portSetting:'服务端口',portLabel:'本地端口',savePort:'保存端口',portHint:'默认 17831。修改后需要重启启动器服务才能切换到新端口。',portSaved:'端口已保存为 {port}。请重启启动器服务，然后访问 http://127.0.0.1:{port}',invalidPort:'端口必须是 1024–65535 之间的整数。',openDirectory:'打开当前目录',openDirectoryFailed:'打开目录失败：{msg}'},
+en:{title:'Codex Account Switch Launcher',subtitle:'Launchers and account mnemonics are independent; status and quota stay local',launchers:'Launchers',recent:'Recent switches',settings:'Settings',settingsSub:'Language, account mnemonics, and launcher management',appearanceDark:'Switch to light mode',appearanceLight:'Switch to dark mode',language:'Language',accountManage:'Account mnemonics',launcherManage:'Launcher management',addAccount:'+ Add account mnemonic',addLauncher:'+ Add launcher',boundAccount:'Logged-in account',themeColor:'Theme color',save:'Save',cancel:'Cancel',mnemonic:'Account mnemonic',userType:'User type',weeklyRemaining:'Weekly remaining',resetCount:'Reset count',confirmReset:'Confirm quota reset',confirmResetHint:'Please confirm you are resetting the correct account.',resetEffect:'Weekly remaining will become 100%, and the 5-hour countdown will be cleared and marked available.',consumeReset:'Consume 1 reset and reset quota',consumeResetHint:'Available reset count: {count}. This option subtracts 1 reset after restoring the quota.',confirm:'Confirm reset',currentLauncher:'Current launcher',currentAccount:'Recorded account',nextLauncher:'Suggested next',noAccount:'No account bound',noNext:'No other available launcher is suggested',systemDefault:'System default · original launch',current:'Current',launch:'Launch',markCurrent:'Set current',fiveHour:'5-hour reset',startFiveHour:'Start 5-hour reset',restartFiveHour:'Restart 5-hour reset',available:'Available',nextReset:'Next reset',resetAll:'Reset quota',edit:'Edit',delete:'Delete',noHistory:'No switch history yet',manual:'Manual correction',launched:'Launch',newAccount:'Add account mnemonic',editAccount:'Edit account mnemonic',newLauncher:'Add launcher',editLauncher:'Edit launcher {id}',deleteAccountConfirm:'Delete account mnemonic “{name}”? Any launcher bound to it will become unbound.',deleteLauncherConfirm:'Delete launcher {id}? Its CODEX_HOME and Desktop data directory will not be deleted.',aRule:'A is the permanent system-default launcher. It always uses the untouched official launch method with no CODEX_HOME or --user-data-dir.',dataPath:'Local data: {path}',footer:'“Current” means the launcher last launched or manually marked here. It does not verify the actual OpenAI login.',editCount:'Edit reset count for “{name}”',error:'Action failed: {msg}',selectAccount:'Select account',confirmLaunch:'Launch {id}?\n\nLogged-in account: {account}\n\nThe current ChatGPT instance will be closed gracefully before this launcher starts.',confirmClose:'Close current launcher {id}?\n\nLogged-in account: {account}\n\nChatGPT will be closed gracefully.',confirmRestartFive:'“{account}” already has an active 5-hour reset countdown.\n\nRestart it now? The existing countdown will be replaced.',maxReached:'A maximum of 3 launchers is supported.',customResetTime:'Custom next reset time',customTimeButton:'Custom time',hour:'Hour',minute:'Minute',customTimeHint:'Enter local time as HH:MM. If that clock time has already passed, tomorrow is used; the target must be within the next 5 hours.',invalidTime:'Invalid time. Enter 00:00–23:59.',customTimeTooFar:'That time is not within the next 5 hours. Please check the value. The existing countdown was not changed.',close:'Close',noCurrent:'No launcher is currently marked',closeFailed:'Close failed: {msg}',switchAndLaunch:'Switch & launch {id}',confirmSwitch:'Switch launcher?\n\nCurrent: {current} · {currentAccount}\nTarget: {next} · {nextAccount}\n\nThe current ChatGPT will be closed gracefully before the target launcher starts.',weeklyValue:'Weekly remaining {value}%',fiveHourStatus:'5-hour status',weeklyResetAt:'Next weekly reset',weeklyResetShort:'Next weekly reset',weeklyResetEditorTitle:'Set weekly reset time',weeklyResetHint:'Enter the time in the device local timezone. It is stored as a timestamp.',globalQuotaReset:'Global quota reset',globalResetCard:'Global reset card',globalQuotaTitle:'Confirm global quota reset',globalQuotaSubtitle:'This affects every recorded account, not just one launcher.',globalQuotaEffect:'Every account will be restored to 100% weekly remaining. Any active 5-hour reset countdown will be cleared and marked available. Weekly reset times and reset counts are unchanged.',globalQuotaConfirm:'Confirm global quota reset',globalCardTitle:'Confirm global reset card',globalCardSubtitle:'This grants one additional reset to every recorded account.',globalCardEffect:'Every account reset count will increase by 1. Weekly remaining, 5-hour reset status, and weekly reset times are unchanged.',globalCardConfirm:'Grant global reset card',timesUnit:'times',viewWorkspaces:'View workspaces',workspaceTitle:'Launcher {id} workspaces',workspaceSubtitle:'Read-only view of local Codex workspace configuration',workspaceEmpty:'No saved local workspaces were found.',workspacePrimary:'Primary',workspaceAdditional:'Additional',workspaceUpdated:'Updated',workspaceSource:'Source: {path} · read-only',workspaceMissing:'Workspace state file not found: {path}',closeViewer:'Close',workspaceLoadError:'Failed to read workspaces: {msg}',viewSkills:'View Skills',skillsTitle:'Launcher {id} Skills',skillsSubtitle:'User-level Skills · reads/copies only $CODEX_HOME/skills and excludes .system',skillsEmpty:'No user-level Skills found.',skillsSource:'Directory: {path}',skillsFiles:'{count} files',copyFromLauncher:'Copy missing Skills from another launcher',copyMissingSkills:'Copy missing Skills',skillsCopyConfirm:'Copy missing Skills from launcher {source} to launcher {target}?\n\nOnly user Skill directories containing SKILL.md are copied; .system is skipped; existing same-name Skills are never overwritten; auth, workspaces, and other Codex state are not copied.',skillsCopyDone:'Copied {copied}; skipped {skipped}.',skillsCopyNone:'There are no missing Skills to copy.',skillsLoadError:'Failed to read Skills: {msg}',skillsNoOtherLauncher:'No other launcher is available as a source.',openDirectory:'Open directory',openDirectoryFailed:'Failed to open directory: {msg}'}}
+let S=null,LANG='zh-CN',resetTarget=null,customTimeTarget=null,weeklyResetTarget=null,globalActionTarget=null,skillsTarget=null;
+const DEFAULT_THEME_COLORS={A:'#76D5CF',B:'#D0DF5D',C:'#A9669C'};
+function applyAppearance(){const mode=S?.state?.appearance||'dark';document.documentElement.dataset.theme=mode;const b=$('themeToggle');if(b){b.textContent=mode==='dark'?'☀︎':'☾';b.title=t(mode==='dark'?'appearanceDark':'appearanceLight');b.setAttribute('aria-label',b.title)}}
+async function toggleAppearance(){const next=(S?.state?.appearance||'dark')==='dark'?'light':'dark';try{S=await api('/api/settings',{appearance:next});applyAppearance();render()}catch(e){alert(t('error',{msg:e.message}))}} const $=id=>document.getElementById(id); const t=(k,v={})=>{let s=(I18N[LANG]||I18N['zh-CN'])[k]||k;Object.entries(v).forEach(([a,b])=>s=s.replaceAll('{'+a+'}',b));return s};
+function esc(s){return (s??'').toString().replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+async function api(path,body){const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});const j=await r.json();if(!r.ok)throw new Error(j.error||'Request failed');return j}
+function account(id){return S.accounts.find(a=>a.id===Number(id))} function launcher(id){return S.launchers.find(l=>l.id===id)}
+function pastel(hex,ratio=.89){hex=(hex||DEFAULT_THEME_COLORS.A).replace('#','');const n=parseInt(hex,16),r=(n>>16)&255,g=(n>>8)&255,b=n&255;if((S?.state?.appearance||'dark')==='dark'){const base=[18,24,32],strength=Math.max(.10,1-ratio);return `rgb(${Math.round(base[0]+(r-base[0])*strength)},${Math.round(base[1]+(g-base[1])*strength)},${Math.round(base[2]+(b-base[2])*strength)})`}const mix=x=>Math.round(x+(255-x)*ratio);return `rgb(${mix(r)},${mix(g)},${mix(b)})`}
+function lighten(hex,ratio=.18){hex=(hex||DEFAULT_THEME_COLORS.A).replace('#','');const n=parseInt(hex,16),r=(n>>16)&255,g=(n>>8)&255,b=n&255;const mix=x=>Math.round(x+(255-x)*ratio);return `rgb(${mix(r)},${mix(g)},${mix(b)})`}
+function summaryStyle(color,kind){const isNext=kind==='next';return `--accent:${color};border-color:${lighten(color,isNext?.08:.18)};background:${pastel(color,isNext?.70:.78)}`}
+function localTime(ts){if(!ts)return '—';return new Intl.DateTimeFormat(LANG==='zh-CN'?'zh-CN':'en',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'}).format(new Date(ts*1000))}
+function weeklyTime(ts){if(!ts)return '—';return new Intl.DateTimeFormat(LANG==='zh-CN'?'zh-CN':'en',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(ts*1000))}
+function localDateTimeValue(ts){if(!ts)return '';const d=new Date(ts*1000),p=n=>String(n).padStart(2,'0');return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:00`}
+function countdown(ts){if(!ts||ts<=Math.floor(Date.now()/1000))return '—';let d=ts-Math.floor(Date.now()/1000),h=Math.floor(d/3600),m=Math.floor((d%3600)/60),s=d%60;return [h,m,s].map(x=>String(x).padStart(2,'0')).join(':')}
+function applyI18n(){document.documentElement.lang=LANG;document.querySelectorAll('[data-i18n]').forEach(e=>e.textContent=t(e.dataset.i18n));$('title').textContent=t('title');$('subtitle').textContent=t('subtitle');$('footer').textContent=t('footer')}
+async function refresh(){S=await (await fetch('/api/state',{cache:'no-store'})).json();LANG=S.state.language||'zh-CN';applyAppearance();render()}
+function accountOptions(selected){return `<option value="">${t('noAccount')}</option>`+S.accounts.map(a=>`<option value="${a.id}" ${Number(selected)===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}
+function membershipBadge(a){return a?`<span class="membership-badge">${esc(a.user_type||'Plus')}</span>`:''}
+function accountUsable(a){return !!a&&a.weekly_remaining>0&&(!a.five_hour_reset_at||a.five_hour_reset_at<=Math.floor(Date.now()/1000))}
+function render(){
+applyI18n();$('lang').value=LANG;$('version').textContent='v'+S.version;
+const cur=S.state.active_launcher?launcher(S.state.active_launcher):null,ca=cur?account(cur.account_id):null;
+$('currentBox').className='summary-card current-summary';
+if(cur){
+  const color=cur.theme_color||DEFAULT_THEME_COLORS.A,wait=ca?.five_hour_reset_at&&ca.five_hour_reset_at>Math.floor(Date.now()/1000);
+  $('currentBox').setAttribute('style',summaryStyle(color,'current'));
+  $('currentBox').innerHTML=`<div class="summary-topline"><span class="summary-launcher-id">${esc(cur.id)}</span><span class="eyebrow">${t('currentLauncher')}</span></div><div class="summary-accountline"><div class="summary-account">${ca?esc(ca.name):t('noAccount')}</div>${membershipBadge(ca)}</div>${cur.id==='A'?`<div class="system-note">${t('systemDefault')}</div>`:''}${ca?`<div class="summary-quota"><div class="fieldline"><span>${t('weeklyRemaining')}</span></div><div class="weekly-layout"><div class="quota"><input type="range" min="0" max="100" value="${ca.weekly_remaining}" style="--accent:${color}" oninput="this.nextElementSibling.textContent=this.value+'%'" onchange="weekly(${ca.id},this.value)"><span class="metric-value">${ca.weekly_remaining}%</span></div><div class="weekly-reset-box"><div class="weekly-reset-label">${t('weeklyResetShort')}</div><div class="weekly-reset-value">${weeklyTime(ca.weekly_reset_at)}<button class="pencil summary-edit" onclick="openWeeklyResetEditor(${ca.id})">✎</button></div></div></div></div><div class="summary-countdown"><div class="fieldline"><span>${t('fiveHour')}</span><span class="countdown" data-reset-at="${ca.five_hour_reset_at||0}">${countdown(ca.five_hour_reset_at)}</span></div><div class="nexttime">${ca.five_hour_reset_at?`${t('nextReset')}：${localTime(ca.five_hour_reset_at)}`:''}</div><div class="summary-actions"><button class="btn small" onclick="startFive(${ca.id})">${wait?t('restartFiveHour'):t('startFiveHour')}</button></div></div>`:''}`;
+}else{
+  $('currentBox').removeAttribute('style');
+  $('currentBox').innerHTML=`<div class="summary-topline"><span class="summary-launcher-id">—</span><span class="eyebrow">${t('currentLauncher')}</span></div><div class="empty" style="margin-top:14px">${t('noCurrent')}</div>`;
+}
+const nxt=launcher(S.next_launcher),na=nxt?account(nxt.account_id):null;
+$('nextBox').className='summary-card next-summary';
+if(nxt){
+  const color=nxt.theme_color||DEFAULT_THEME_COLORS.A;
+  $('nextBox').setAttribute('style',summaryStyle(color,'next'));
+  $('nextBox').innerHTML=`<div class="summary-topline"><span class="summary-launcher-id">${esc(nxt.id)}</span><span class="eyebrow">${t('nextLauncher')}</span></div><div class="summary-accountline"><div class="summary-account">${na?esc(na.name):t('noAccount')}</div>${membershipBadge(na)}</div>${na?`<div class="field next-quota-block" style="max-width:520px"><div class="fieldline"><span>${t('weeklyRemaining')}</span><strong>${na.weekly_remaining}%</strong></div><div class="weekly-layout next-weekly-layout"><div class="summary-progress-wrap"><div class="summary-progress"><div style="height:100%;width:${na.weekly_remaining}%;background:${color};border-radius:999px"></div></div></div><div class="weekly-reset-box"><div class="weekly-reset-label">${t('weeklyResetShort')}</div><div class="weekly-reset-value">${weeklyTime(na.weekly_reset_at)}</div></div></div>${na.five_hour_reset_at?`<div class="nexttime next-fivehour-line">${t('fiveHour')}：<span class="countdown" data-reset-at="${na.five_hour_reset_at}">${countdown(na.five_hour_reset_at)}</span> · ${t('nextReset')}：${localTime(na.five_hour_reset_at)}</div>`:`<div class="nexttime next-fivehour-line">${t('fiveHour')}：—</div>`}</div>`:''}<div class="summary-actions"><button class="btn primary switch" onclick="switchToSuggested('${nxt.id}')">${t('switchAndLaunch',{id:nxt.id})}</button></div>`;
+}else{
+  $('nextBox').removeAttribute('style');
+  $('nextBox').innerHTML=`<div class="summary-topline"><span class="summary-launcher-id">—</span><span class="eyebrow">${t('nextLauncher')}</span></div><div class="empty" style="margin-top:14px">${t('noNext')}</div>`;
+}
+$('launchers').innerHTML=S.launchers.map(l=>{const a=account(l.account_id),color=l.theme_color||DEFAULT_THEME_COLORS.A,active=S.state.active_launcher===l.id,wait=a?.five_hour_reset_at&&a.five_hour_reset_at>Math.floor(Date.now()/1000);return `<div class="launcher-card" style="--accent:${color};border-color:${color};background:${pastel(color)}"><div class="launcher-head"><div class="launcher-heading"><div class="launcher-meta-line"><span class="launcher-id">${esc(l.id)}</span>${l.id==='A'?`<span class="system-inline">${t('systemDefault')}</span>`:''}${active?`<span class="current-badge" style="color:${color}">${t('current')}</span>`:''}</div><div class="account-title-line"><div class="title-account-wrap"><select class="title-account-select" aria-label="${t('boundAccount')}" onchange="bindAccount('${l.id}',this.value)">${accountOptions(l.account_id)}</select></div>${membershipBadge(a)}</div></div></div>${a?`<div class="metrics-stack"><div class="metric-row"><div class="fieldline"><span class="metric-label">${t('weeklyRemaining')}</span></div><div class="weekly-layout"><div class="quota"><input type="range" min="0" max="100" value="${a.weekly_remaining}" oninput="this.nextElementSibling.textContent=this.value+'%'" onchange="weekly(${a.id},this.value)"><span class="metric-value">${a.weekly_remaining}%</span></div><div class="weekly-reset-box"><div class="weekly-reset-label">${t('weeklyResetShort')}</div><div class="weekly-reset-value">${weeklyTime(a.weekly_reset_at)}<button class="pencil hover-edit" onclick="openWeeklyResetEditor(${a.id})">✎</button></div></div></div></div><div class="metric-row"><div class="fieldline"><span class="metric-label">${t('fiveHour')}</span><span class="countdown status-compact" data-reset-at="${a.five_hour_reset_at||0}">${countdown(a.five_hour_reset_at)}</span></div><div class="nexttime">${a.five_hour_reset_at?`${t('nextReset')}：${localTime(a.five_hour_reset_at)}`:''}</div><div class="resetline hover-edit"><div class="row-actions"><button class="btn small" onclick="startFive(${a.id})">${wait?t('restartFiveHour'):t('startFiveHour')}</button><button class="btn small" onclick="openCustomTime(${a.id})">${t('customTimeButton')}</button></div></div></div><div class="metric-row count-row"><div class="countline"><span class="metric-label">${t('resetCount')}</span><span class="inlineedit"><span class="count metric-value">${a.reset_count} ${t('timesUnit')}</span><button class="pencil hover-edit" onclick="editResetCount(${a.id})">✎</button></span></div></div></div>`:`<div class="empty" style="margin-top:18px">${t('noAccount')}</div>`}<div class="launcher-tools"><div class="launcher-tools-inner"><button class="btn" onclick="openWorkspaceViewer('${l.id}')">${t('viewWorkspaces')}</button><button class="btn" onclick="openSkillsViewer('${l.id}')">${t('viewSkills')}</button>${a?`<button class="btn" onclick="confirmResetAll(${a.id})">${t('resetAll')}</button>`:''}</div></div><div class="actions divided"><button class="btn primary always-action" onclick="launchP('${l.id}')">${t('launch')} ${l.id}</button>${active?`<button class="btn danger always-action" onclick="closeLauncher('${l.id}')">${t('close')}</button>`:`<button class="btn hover-edit" onclick="mark('${l.id}')">${t('markCurrent')}</button>`}</div></div>`}).join('');
+$('history').innerHTML=S.history.length?S.history.map(h=>`<div class="hist"><b>${esc(h.from_launcher||'—')}</b> → <b>${esc(h.to_launcher)}</b> · ${localTime(h.switched_at)} · ${h.reason==='manual'?t('manual'):t('launched')}</div>`).join(''):`<div class="hist empty">${t('noHistory')}</div>`;setupHoverEditors();renderSettings();$('dataPath').textContent=t('dataPath',{path:S.db_path})}
+
+const hoverHideTimers=new WeakMap();
+function bindDelayedEditor(el){if(!el)return;el.addEventListener('mouseenter',()=>{const old=hoverHideTimers.get(el);if(old)clearTimeout(old);el.classList.add('edit-visible')});el.addEventListener('mouseleave',()=>{const old=hoverHideTimers.get(el);if(old)clearTimeout(old);const timer=setTimeout(()=>{el.classList.remove('edit-visible');hoverHideTimers.delete(el)},2000);hoverHideTimers.set(el,timer)})}
+function setupHoverEditors(){document.querySelectorAll('.launcher-card').forEach(bindDelayedEditor);bindDelayedEditor($('currentBox'));bindDelayedEditor($('nextBox'))}
+function tick(){document.querySelectorAll('[data-reset-at]').forEach(e=>e.textContent=countdown(Number(e.dataset.resetAt)||null))}setInterval(tick,1000);setInterval(()=>refresh().catch(()=>{}),30*60*1000)
+async function launchP(id){const l=launcher(id),a=l?account(l.account_id):null;if(!confirm(t('confirmLaunch',{id,account:a?.name||t('noAccount')})))return;try{S=await api('/api/launch',{id});render()}catch(e){alert(t('error',{msg:e.message}))}}
+async function switchToSuggested(id){const nxt=launcher(id),na=nxt?account(nxt.account_id):null,cur=S.state.active_launcher?launcher(S.state.active_launcher):null,ca=cur?account(cur.account_id):null;const msg=t('confirmSwitch',{current:cur?.id||'—',currentAccount:ca?.name||t('noAccount'),next:nxt?.id||id,nextAccount:na?.name||t('noAccount')});if(!confirm(msg))return;try{S=await api('/api/launch',{id});render()}catch(e){alert(t('error',{msg:e.message}))}}
+async function mark(id){try{S=await api('/api/active',{id});render()}catch(e){alert(t('error',{msg:e.message}))}}
+async function weekly(id,v){try{S=await api('/api/account/weekly',{id,weekly_remaining:Number(v)});render()}catch(e){alert(t('error',{msg:e.message}))}}
+async function bindAccount(id,val){const l=launcher(id);try{S=await api('/api/launcher',{...l,account_id:val?Number(val):null});render()}catch(e){alert(t('error',{msg:e.message}))}}
+function openWeeklyResetEditor(id){weeklyResetTarget=id;const a=account(id);$('weeklyResetAccount').textContent=a?.name||'';$('weeklyResetInput').value=localDateTimeValue(a?.weekly_reset_at);$('weeklyResetEditor').classList.add('show')}
+function closeWeeklyResetEditor(){weeklyResetTarget=null;$('weeklyResetEditor').classList.remove('show')}
+async function saveWeeklyReset(){if(!weeklyResetTarget)return;const raw=$('weeklyResetInput').value;if(!raw){alert(t('weeklyResetAt'));return}const d=new Date(raw);if(Number.isNaN(d.getTime())){alert(t('weeklyResetAt'));return}d.setMinutes(0,0,0);try{S=await api('/api/account/weekly-reset',{id:weeklyResetTarget,weekly_reset_at:Math.floor(d.getTime()/1000)});closeWeeklyResetEditor();render()}catch(e){alert(t('error',{msg:e.message}))}}
+async function startFive(id){const a=account(id),running=!!(a?.five_hour_reset_at&&a.five_hour_reset_at>Math.floor(Date.now()/1000));if(running&&!confirm(t('confirmRestartFive',{account:a?.name||t('noAccount')})))return;try{S=await api('/api/account/start-five-hour',{id});render()}catch(e){alert(t('error',{msg:e.message}))}}
+function openCustomTime(id){customTimeTarget=id;const a=account(id),now=new Date();$('customTimeAccount').textContent=a?.name||'';$('customHour').value=String(now.getHours()).padStart(2,'0');$('customMinute').value=String(now.getMinutes()).padStart(2,'0');$('customTime').classList.add('show');setTimeout(()=>$('customHour').select(),0)}
+function closeCustomTime(){customTimeTarget=null;$('customTime').classList.remove('show')}
+async function saveCustomTime(){if(!customTimeTarget)return;const h=Number($('customHour').value),m=Number($('customMinute').value);if(!Number.isInteger(h)||!Number.isInteger(m)||h<0||h>23||m<0||m>59){alert(t('invalidTime'));return}const now=new Date(),target=new Date(now);target.setHours(h,m,0,0);if(target.getTime()<=now.getTime())target.setDate(target.getDate()+1);const diff=target.getTime()-now.getTime();if(diff<=0||diff>5*60*60*1000){alert(t('customTimeTooFar'));return}try{S=await api('/api/account/custom-five-hour',{id:customTimeTarget,target_timestamp:Math.floor(target.getTime()/1000)});closeCustomTime();render()}catch(e){alert(t('error',{msg:e.message}))}}
+async function closeLauncher(id){const l=launcher(id),a=l?account(l.account_id):null;if(!confirm(t('confirmClose',{id,account:a?.name||t('noAccount')})))return;try{S=await api('/api/close',{id});render()}catch(e){alert(t('closeFailed',{msg:e.message}))}}
+async function editResetCount(id){const a=account(id),v=prompt(t('editCount',{name:a.name}),String(a.reset_count));if(v===null)return;const n=Math.max(0,parseInt(v,10)||0);try{S=await api('/api/account/reset-count',{id,reset_count:n});render()}catch(e){alert(t('error',{msg:e.message}))}}
+function confirmResetAll(id){resetTarget=id;const a=account(id);$('resetName').textContent=a?.name||'';const count=Number(a?.reset_count||0);$('consumeResetBtn').style.display=count>0?'inline-flex':'none';$('consumeResetHint').textContent=count>0?t('consumeResetHint',{count}):'';$('resetConfirm').classList.add('show')}function closeResetConfirm(){resetTarget=null;$('resetConfirm').classList.remove('show')}async function performResetAll(consume=false){if(!resetTarget)return;try{S=await api('/api/account/reset-all',{id:resetTarget,consume_reset_count:!!consume});closeResetConfirm();render()}catch(e){alert(t('error',{msg:e.message}))}}
+function openGlobalConfirm(kind){globalActionTarget=kind;const quota=kind==='quota';$('globalConfirmTitle').textContent=t(quota?'globalQuotaTitle':'globalCardTitle');$('globalConfirmSubtitle').textContent=t(quota?'globalQuotaSubtitle':'globalCardSubtitle');$('globalConfirmEffect').textContent=t(quota?'globalQuotaEffect':'globalCardEffect');$('globalConfirmButton').textContent=t(quota?'globalQuotaConfirm':'globalCardConfirm');$('globalConfirm').classList.add('show')}
+function closeGlobalConfirm(){globalActionTarget=null;$('globalConfirm').classList.remove('show')}
+async function performGlobalAction(){if(!globalActionTarget)return;const path=globalActionTarget==='quota'?'/api/global/quota-reset':'/api/global/reset-card';try{S=await api(path,{});closeGlobalConfirm();render()}catch(e){alert(t('error',{msg:e.message}))}}
+async function openWorkspaceViewer(id){$('workspaceTitle').textContent=t('workspaceTitle',{id});$('workspaceSubtitle').textContent=t('workspaceSubtitle');$('workspaceBody').innerHTML='<div class="workspace-empty">…</div>';$('workspaceSource').textContent='';$('workspaceViewer').classList.add('show');try{const r=await fetch('/api/workspaces?id='+encodeURIComponent(id),{cache:'no-store'});const data=await r.json();if(!r.ok)throw new Error(data.error||r.statusText);if(!data.exists){$('workspaceBody').innerHTML=`<div class="workspace-empty">${esc(t('workspaceEmpty'))}</div>`;$('workspaceSource').textContent=t('workspaceMissing',{path:data.source});return}const projects=data.projects||[];$('workspaceBody').innerHTML=projects.length?projects.map(p=>{const roots=(p.rootPaths||[]).map((root,i)=>`<div class="workspace-root"><span class="workspace-root-label">${t(i===0?'workspacePrimary':'workspaceAdditional')}</span><span class="workspace-path">${esc(root)}</span></div>`).join('');let updated='';if(p.updatedAt){const ms=Number(p.updatedAt);if(Number.isFinite(ms)){updated=`<div class="workspace-meta">${t('workspaceUpdated')}：${esc(new Date(ms).toLocaleString())}</div>`}}return `<div class="workspace-project"><div class="workspace-project-name">${esc(p.name||'')}</div><div class="workspace-roots">${roots||'<div class="muted">—</div>'}</div>${updated}</div>`}).join(''):`<div class="workspace-empty">${esc(t('workspaceEmpty'))}</div>`;$('workspaceSource').textContent=t('workspaceSource',{path:data.source})}catch(e){$('workspaceBody').innerHTML=`<div class="workspace-empty">${esc(t('workspaceLoadError',{msg:e.message}))}</div>`}}
+function closeWorkspaceViewer(){$('workspaceViewer').classList.remove('show')}
+async function openSkillsViewer(id){skillsTarget=id;$('skillsTitle').textContent=t('skillsTitle',{id});$('skillsSubtitle').textContent=t('skillsSubtitle');$('skillsBody').innerHTML='<div class="skill-empty">…</div>';$('skillsSource').textContent='';$('skillsResult').textContent='';const others=S.launchers.filter(l=>l.id!==id);$('skillsCopySource').innerHTML=others.map(l=>`<option value="${esc(l.id)}">${esc(l.id)}</option>`).join('');$('skillsCopyBtn').disabled=!others.length;$('skillsViewer').classList.add('show');try{const r=await fetch('/api/skills?id='+encodeURIComponent(id),{cache:'no-store'});const data=await r.json();if(!r.ok)throw new Error(data.error||r.statusText);const skills=data.skills||[];$('skillsBody').innerHTML=skills.length?skills.map(sk=>`<div class="skill-item"><div class="skill-name">${esc(sk.name)}<span class="skill-pill">SKILL.md</span></div><div class="skill-meta">${esc(t('skillsFiles',{count:sk.file_count||0}))}</div><div class="skill-meta">${esc(sk.path||'')}</div></div>`).join(''):`<div class="skill-empty">${esc(t('skillsEmpty'))}</div>`;$('skillsSource').textContent=t('skillsSource',{path:data.source||''});if(!others.length)$('skillsResult').textContent=t('skillsNoOtherLauncher')}catch(e){$('skillsBody').innerHTML=`<div class="skill-empty">${esc(t('skillsLoadError',{msg:e.message}))}</div>`}}
+function closeSkillsViewer(){skillsTarget=null;$('skillsViewer').classList.remove('show')}
+async function openSkillsDirectory(){if(!skillsTarget)return;try{await api('/api/skills/open',{id:skillsTarget})}catch(e){alert(t('openDirectoryFailed',{msg:e.message}))}}
+async function copySkillsToViewed(){if(!skillsTarget)return;const source=$('skillsCopySource').value;if(!source)return;const target=skillsTarget;if(!confirm(t('skillsCopyConfirm',{source,target})))return;try{const result=await api('/api/skills/copy',{source_id:source,target_id:target});const copied=(result.copied||[]).length,skipped=(result.skipped||[]).length;$('skillsResult').textContent=copied?t('skillsCopyDone',{copied,skipped}):t('skillsCopyNone');await openSkillsViewer(target);$('skillsResult').textContent=copied?t('skillsCopyDone',{copied,skipped}):t('skillsCopyNone')}catch(e){alert(t('error',{msg:e.message}))}}
+function openSettings(){renderSettings();$('settings').classList.add('show')}function closeSettings(){$('settings').classList.remove('show')}async function saveLanguage(v){try{S=await api('/api/settings',{language:v});LANG=v;render()}catch(e){alert(t('error',{msg:e.message}))}}async function savePort(){const port=Number($('portInput').value);if(!Number.isInteger(port)||port<1024||port>65535){alert(t('invalidPort'));return}try{S=await api('/api/settings',{port});renderSettings();alert(t('portSaved',{port}))}catch(e){alert(t('error',{msg:e.message}))}}
+function renderSettings(){if(!S)return;if($('portInput'))$('portInput').value=Number(S.port||S.state?.port||17831);$('accountManage').innerHTML=S.accounts.map(a=>`<div class="manage-row"><div>#${a.id}</div><div><div class="account-title-line"><b>${esc(a.name)}</b>${membershipBadge(a)}</div><div class="system-note">${t('resetCount')} ${a.reset_count}</div></div><div class="row-actions"><button class="btn small" onclick="editAccount(${a.id})">${t('edit')}</button><button class="btn small danger" onclick="deleteAccount(${a.id})">${t('delete')}</button></div></div>`).join('');$('launcherManage').innerHTML=S.launchers.map(l=>{const a=account(l.account_id);return `<div class="manage-row"><div><span class="color-chip" style="background:${l.theme_color}"></span><b>${l.id}</b></div><div><b>${a?esc(a.name):t('noAccount')}</b><div class="system-note">${l.id==='A'?t('systemDefault'):esc(l.codex_home)}</div></div><div class="row-actions"><button class="btn small" onclick="editLauncher('${l.id}')">${t('edit')}</button>${l.id==='A'?'':`<button class="btn small danger" onclick="deleteLauncher('${l.id}')">${t('delete')}</button>`}</div></div>`}).join('');$('addLauncherBtn').disabled=S.launchers.length>=3}
+function editAccount(id=null){const a=id?account(id):null;$('aid').value=a?.id||'';$('aname').value=a?.name||'';$('atype').value=a?.user_type||'Plus';$('aresets').value=a?.reset_count??0;$('accountEditorTitle').textContent=a?t('editAccount'):t('newAccount');$('accountEditor').classList.add('show')}function closeAccountEditor(){$('accountEditor').classList.remove('show')}async function saveAccount(){const id=$('aid').value;const body={name:$('aname').value,user_type:$('atype').value,reset_count:Number($('aresets').value)};if(id)body.id=Number(id);try{S=await api('/api/account',body);closeAccountEditor();render()}catch(e){alert(t('error',{msg:e.message}))}}async function deleteAccount(id){const a=account(id);if(!confirm(t('deleteAccountConfirm',{name:a.name})))return;try{S=await api('/api/account/delete',{id});render()}catch(e){alert(t('error',{msg:e.message}))}}
+function nextLauncherId(){return ['B','C'].find(x=>!launcher(x))}function addLauncher(){const id=nextLauncherId();if(!id){alert(t('maxReached'));return}editLauncher(id,true)}function editLauncher(id,isNew=false){const l=isNew?{id,theme_color:DEFAULT_THEME_COLORS[id]||DEFAULT_THEME_COLORS.C,account_id:null,codex_home:`~/.codex-profile-${id.toLowerCase()}`,desktop_data_dir:`~/Library/Application Support/ChatGPT-Profiles/${id}`} : launcher(id);$('lid').value=id;$('laccount').innerHTML=accountOptions(l.account_id);$('lcolor').value=l.theme_color||DEFAULT_THEME_COLORS[id]||DEFAULT_THEME_COLORS.A;$('lcolorText').textContent=$('lcolor').value.toUpperCase();$('lcolor').oninput=()=>$('lcolorText').textContent=$('lcolor').value.toUpperCase();$('lhome').value=l.codex_home||'';$('ldata').value=l.desktop_data_dir||'';$('isolated').style.display=id==='A'?'none':'block';$('aRule').textContent=id==='A'?t('aRule'):'';$('launcherEditorTitle').textContent=isNew?t('newLauncher'):t('editLauncher',{id});$('launcherEditor').classList.add('show')}function closeLauncherEditor(){$('launcherEditor').classList.remove('show')}async function saveLauncher(){const id=$('lid').value,body={id,theme_color:$('lcolor').value,account_id:$('laccount').value?Number($('laccount').value):null};if(id!=='A'){body.codex_home=$('lhome').value;body.desktop_data_dir=$('ldata').value}try{S=await api('/api/launcher',body);closeLauncherEditor();render()}catch(e){alert(t('error',{msg:e.message}))}}async function deleteLauncher(id){if(!confirm(t('deleteLauncherConfirm',{id})))return;try{S=await api('/api/launcher/delete',{id});render()}catch(e){alert(t('error',{msg:e.message}))}}
+refresh();
+</script></body></html>

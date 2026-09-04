@@ -1,0 +1,42 @@
+# Runtime data (never publish account/profile state)
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# SQLite / local state
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
+*.db
+
+# Logs / process files
+*.log
+*.pid
+logs/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Editors / IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Build / release outputs
+build/
+dist/
+release/
+*.zip
+
+# Local environment overrides
+.env
+.env.*
+!.env.example
