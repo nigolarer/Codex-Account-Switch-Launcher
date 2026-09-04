@@ -1,6 +1,6 @@
 #!/bin/zsh
 cat <<'EOF'
-The resident LaunchAgent mode is deprecated in v0.19.1.
+The resident LaunchAgent mode is deprecated in v0.19.2.
 Use the standalone native Dock App instead:
 
   ./scripts/install-app.sh

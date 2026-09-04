@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-VERSION="0.19.1"
+VERSION="0.19.3"
 PRODUCT="Codex Switcher"
 APP_NAME="$PRODUCT.app"
 BUILD_ROOT="$ROOT/build/release"
@@ -14,6 +14,37 @@ RUNTIME="$RESOURCES/runtime"
 DIST_DIR="$ROOT/dist"
 RELEASE_DIR="$ROOT/release"
 ZIP_NAME="Codex-Switcher-v${VERSION}-macOS-arm64.zip"
+
+ICON_SOURCE="$ROOT/assets/AppIcon.png"
+ICONSET_DIR="$BUILD_ROOT/AppIcon.iconset"
+ICON_FILE="$RESOURCES/AppIcon.icns"
+
+
+generate_app_icon() {
+  if [[ ! -f "$ICON_SOURCE" ]]; then
+    echo "App icon source is missing: $ICON_SOURCE"
+    exit 1
+  fi
+  if [[ ! -x /usr/bin/sips || ! -x /usr/bin/iconutil ]]; then
+    echo "sips/iconutil are required to build the macOS app icon."
+    exit 1
+  fi
+
+  rm -rf "$ICONSET_DIR"
+  mkdir -p "$ICONSET_DIR"
+  /usr/bin/sips -z 16 16 "$ICON_SOURCE" --out "$ICONSET_DIR/icon_16x16.png" >/dev/null
+  /usr/bin/sips -z 32 32 "$ICON_SOURCE" --out "$ICONSET_DIR/icon_16x16@2x.png" >/dev/null
+  /usr/bin/sips -z 32 32 "$ICON_SOURCE" --out "$ICONSET_DIR/icon_32x32.png" >/dev/null
+  /usr/bin/sips -z 64 64 "$ICON_SOURCE" --out "$ICONSET_DIR/icon_32x32@2x.png" >/dev/null
+  /usr/bin/sips -z 128 128 "$ICON_SOURCE" --out "$ICONSET_DIR/icon_128x128.png" >/dev/null
+  /usr/bin/sips -z 256 256 "$ICON_SOURCE" --out "$ICONSET_DIR/icon_128x128@2x.png" >/dev/null
+  /usr/bin/sips -z 256 256 "$ICON_SOURCE" --out "$ICONSET_DIR/icon_256x256.png" >/dev/null
+  /usr/bin/sips -z 512 512 "$ICON_SOURCE" --out "$ICONSET_DIR/icon_256x256@2x.png" >/dev/null
+  /usr/bin/sips -z 512 512 "$ICON_SOURCE" --out "$ICONSET_DIR/icon_512x512.png" >/dev/null
+  /usr/bin/sips -z 1024 1024 "$ICON_SOURCE" --out "$ICONSET_DIR/icon_512x512@2x.png" >/dev/null
+  /usr/bin/iconutil -c icns "$ICONSET_DIR" -o "$ICON_FILE"
+  rm -rf "$ICONSET_DIR"
+}
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
   echo "Release builds must run on macOS."
@@ -91,6 +122,7 @@ MACOSX_DEPLOYMENT_TARGET=13.0 "$VENV/bin/pyinstaller" \
 
 cp -R "$DIST_DIR/CodexSwitcherServer" "$RUNTIME/server"
 cp -R "$ROOT/static/." "$RUNTIME/static/"
+generate_app_icon
 
 cat > "$CONTENTS/Info.plist" <<PLIST_EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -103,6 +135,7 @@ cat > "$CONTENTS/Info.plist" <<PLIST_EOF
   <key>CFBundleShortVersionString</key><string>${VERSION}</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleExecutable</key><string>CodexSwitcher</string>
+  <key>CFBundleIconFile</key><string>AppIcon.icns</string>
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>LSArchitecturePriority</key><array><string>arm64</string></array>
   <key>NSHighResolutionCapable</key><true/>
@@ -125,6 +158,10 @@ echo "Applying ad-hoc signature..."
 # Sanity checks: release App must not depend on project Python or source server.py.
 if [[ -e "$RESOURCES/python-path.txt" || -e "$RUNTIME/app/server.py" ]]; then
   echo "Release validation failed: development Python/source artifacts are present."
+  exit 1
+fi
+if [[ ! -f "$ICON_FILE" ]]; then
+  echo "Release validation failed: AppIcon.icns is missing."
   exit 1
 fi
 if [[ ! -x "$RUNTIME/server/CodexSwitcherServer" ]]; then

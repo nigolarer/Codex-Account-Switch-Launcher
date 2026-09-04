@@ -1,6 +1,11 @@
-# Codex Switcher v0.19.1
+# Codex Switcher v0.19.3
 
 Codex Switcher is a lightweight macOS app for switching between multiple local Codex / ChatGPT Desktop launch profiles while keeping each profile's login state isolated.
+
+## v0.19.3 app icon integration
+
+Codex Switcher now includes its own macOS app icon. The canonical source artwork is tracked at `assets/AppIcon.png`; both local installation and GitHub Release builds automatically convert it into a standard `AppIcon.icns` and embed it in the `.app` bundle. This release also retains the v0.19.2 native `alert()` / `confirm()` / `prompt()` WKWebView dialog fix.
+
 
 ## Highlights
 
@@ -45,7 +50,7 @@ Native app logs:
 
 ### Automatic migration from older releases
 
-If the new database does not exist, v0.19.1 automatically copies data from the previous location:
+If the new database does not exist, v0.19.3 automatically copies data from the previous location:
 
 ```text
 ~/Library/Application Support/com.ping.codex-account-switch-launcher/
@@ -119,7 +124,7 @@ The script:
 Output:
 
 ```text
-release/Codex-Switcher-v0.19.1-macOS-arm64.zip
+release/Codex-Switcher-v0.19.3-macOS-arm64.zip
 ```
 
 End users only need to unzip the archive and move `Codex Switcher.app` into `/Applications`.

@@ -1,7 +1,7 @@
 import Cocoa
 import WebKit
 
-final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate {
     private var window: NSWindow!
     private var webView: WKWebView!
     private var serverProcess: Process?
@@ -60,6 +60,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
         config.websiteDataStore = .default()
         webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = self
+        webView.uiDelegate = self
         webView.setValue(false, forKey: "drawsBackground")
 
         window = NSWindow(
@@ -223,6 +224,70 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
         alert.informativeText = message
         alert.runModal()
         NSApp.terminate(nil)
+    }
+
+    // WKWebView does not present JavaScript alert/confirm/prompt dialogs unless
+    // a WKUIDelegate implements them. The web UI relies on these dialogs for
+    // destructive or state-changing actions, so bridge them to native NSAlert.
+    func webView(_ webView: WKWebView,
+                 runJavaScriptAlertPanelWithMessage message: String,
+                 initiatedByFrame frame: WKFrameInfo,
+                 completionHandler: @escaping () -> Void) {
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "Codex Switcher"
+        alert.informativeText = message
+        alert.addButton(withTitle: "OK")
+        if let window = window, window.isVisible {
+            alert.beginSheetModal(for: window) { _ in completionHandler() }
+        } else {
+            alert.runModal()
+            completionHandler()
+        }
+    }
+
+    func webView(_ webView: WKWebView,
+                 runJavaScriptConfirmPanelWithMessage message: String,
+                 initiatedByFrame frame: WKFrameInfo,
+                 completionHandler: @escaping (Bool) -> Void) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Codex Switcher"
+        alert.informativeText = message
+        alert.addButton(withTitle: "Confirm")
+        alert.addButton(withTitle: "Cancel")
+        if let window = window, window.isVisible {
+            alert.beginSheetModal(for: window) { response in
+                completionHandler(response == .alertFirstButtonReturn)
+            }
+        } else {
+            let response = alert.runModal()
+            completionHandler(response == .alertFirstButtonReturn)
+        }
+    }
+
+    func webView(_ webView: WKWebView,
+                 runJavaScriptTextInputPanelWithPrompt prompt: String,
+                 defaultText: String?,
+                 initiatedByFrame frame: WKFrameInfo,
+                 completionHandler: @escaping (String?) -> Void) {
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "Codex Switcher"
+        alert.informativeText = prompt
+        let input = NSTextField(string: defaultText ?? "")
+        input.frame = NSRect(x: 0, y: 0, width: 320, height: 24)
+        alert.accessoryView = input
+        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "Cancel")
+        if let window = window, window.isVisible {
+            alert.beginSheetModal(for: window) { response in
+                completionHandler(response == .alertFirstButtonReturn ? input.stringValue : nil)
+            }
+        } else {
+            let response = alert.runModal()
+            completionHandler(response == .alertFirstButtonReturn ? input.stringValue : nil)
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }

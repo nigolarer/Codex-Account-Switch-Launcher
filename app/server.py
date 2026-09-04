@@ -32,7 +32,7 @@ HOST = os.environ.get("CODEX_LAUNCHER_HOST", "127.0.0.1")
 DEFAULT_PORT = 17831
 PORT_ENV = os.environ.get("CODEX_LAUNCHER_PORT")
 CHATGPT_APP = os.environ.get("CHATGPT_APP", "/Applications/ChatGPT.app")
-APP_VERSION = "0.19.1"
+APP_VERSION = "0.19.3"
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 

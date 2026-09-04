@@ -7,12 +7,42 @@ CONTENTS="$APP_DIR/Contents"
 MACOS="$CONTENTS/MacOS"
 RESOURCES="$CONTENTS/Resources"
 RUNTIME="$RESOURCES/runtime"
+ICON_SOURCE="$ROOT/assets/AppIcon.png"
+ICONSET_DIR="${TMPDIR:-/tmp}/codex-switcher-appicon.$$.iconset"
+ICON_FILE="$RESOURCES/AppIcon.icns"
 APP_SUPPORT="$HOME/Library/Application Support/com.nigolarer.codex-switcher"
 OLD_APP_SUPPORT="$HOME/Library/Application Support/com.ping.codex-account-switch-launcher"
 OLD_PROJECT_DATA="$ROOT/data"
 OLD_APP_DIR="$HOME/Applications/Codex账号切换启动器.app"
 LABEL="local.codex-profile-launcher"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+
+
+generate_app_icon() {
+  if [[ ! -f "$ICON_SOURCE" ]]; then
+    echo "App icon source is missing: $ICON_SOURCE"
+    exit 1
+  fi
+  if [[ ! -x /usr/bin/sips || ! -x /usr/bin/iconutil ]]; then
+    echo "sips/iconutil are required to build the macOS app icon."
+    exit 1
+  fi
+
+  rm -rf "$ICONSET_DIR"
+  mkdir -p "$ICONSET_DIR"
+  /usr/bin/sips -z 16 16 "$ICON_SOURCE" --out "$ICONSET_DIR/icon_16x16.png" >/dev/null
+  /usr/bin/sips -z 32 32 "$ICON_SOURCE" --out "$ICONSET_DIR/icon_16x16@2x.png" >/dev/null
+  /usr/bin/sips -z 32 32 "$ICON_SOURCE" --out "$ICONSET_DIR/icon_32x32.png" >/dev/null
+  /usr/bin/sips -z 64 64 "$ICON_SOURCE" --out "$ICONSET_DIR/icon_32x32@2x.png" >/dev/null
+  /usr/bin/sips -z 128 128 "$ICON_SOURCE" --out "$ICONSET_DIR/icon_128x128.png" >/dev/null
+  /usr/bin/sips -z 256 256 "$ICON_SOURCE" --out "$ICONSET_DIR/icon_128x128@2x.png" >/dev/null
+  /usr/bin/sips -z 256 256 "$ICON_SOURCE" --out "$ICONSET_DIR/icon_256x256.png" >/dev/null
+  /usr/bin/sips -z 512 512 "$ICON_SOURCE" --out "$ICONSET_DIR/icon_256x256@2x.png" >/dev/null
+  /usr/bin/sips -z 512 512 "$ICON_SOURCE" --out "$ICONSET_DIR/icon_512x512.png" >/dev/null
+  /usr/bin/sips -z 1024 1024 "$ICON_SOURCE" --out "$ICONSET_DIR/icon_512x512@2x.png" >/dev/null
+  /usr/bin/iconutil -c icns "$ICONSET_DIR" -o "$ICON_FILE"
+  rm -rf "$ICONSET_DIR"
+}
 
 # Gracefully quit a previously installed native App before replacing its bundle.
 /usr/bin/osascript -e 'tell application "Codex Switcher" to quit' >/dev/null 2>&1 || true
@@ -105,10 +135,11 @@ cat > "$CONTENTS/Info.plist" <<'PLIST_EOF'
   <key>CFBundleName</key><string>Codex Switcher</string>
   <key>CFBundleDisplayName</key><string>Codex Switcher</string>
   <key>CFBundleIdentifier</key><string>com.nigolarer.codex-switcher</string>
-  <key>CFBundleVersion</key><string>0.19.1</string>
-  <key>CFBundleShortVersionString</key><string>0.19.1</string>
+  <key>CFBundleVersion</key><string>0.19.3</string>
+  <key>CFBundleShortVersionString</key><string>0.19.3</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleExecutable</key><string>CodexAccountSwitcher</string>
+  <key>CFBundleIconFile</key><string>AppIcon.icns</string>
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>NSHighResolutionCapable</key><true/>
 </dict></plist>
@@ -118,6 +149,7 @@ PLIST_EOF
 cp -p "$ROOT/app/server.py" "$RUNTIME/app/server.py"
 cp -R "$ROOT/static/." "$RUNTIME/static/"
 printf '%s\n' "$PYTHON_BIN" > "$RESOURCES/python-path.txt"
+generate_app_icon
 
 DEVELOPER_DIR="$DEVELOPER_DIR_PATH" "$SWIFTC" \
   "$ROOT/macos/App.swift" \
