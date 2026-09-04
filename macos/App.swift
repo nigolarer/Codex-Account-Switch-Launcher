@@ -8,7 +8,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
     private var ownsServer = false
     private var launcherURL: URL?
     private var runtimeRoot: URL!
-    private var serverURL: URL!
+    private var bundledServerURL: URL?
+    private var sourceServerURL: URL?
     private var pythonPath: String = ""
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -24,9 +25,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
             return false
         }
         runtimeRoot = resources.appendingPathComponent("runtime", isDirectory: true)
-        serverURL = runtimeRoot.appendingPathComponent("app/server.py")
-        guard FileManager.default.fileExists(atPath: serverURL.path) else {
-            showFatal("The bundled local service is missing. Please run scripts/install-app.sh again.")
+
+        let releaseServer = runtimeRoot.appendingPathComponent("server/CodexSwitcherServer")
+        if FileManager.default.isExecutableFile(atPath: releaseServer.path) {
+            bundledServerURL = releaseServer
+            return true
+        }
+
+        // Development/local-install fallback. Public release builds do not need Python.
+        let sourceServer = runtimeRoot.appendingPathComponent("app/server.py")
+        sourceServerURL = sourceServer
+        guard FileManager.default.fileExists(atPath: sourceServer.path) else {
+            showFatal("The bundled local service is missing. Please reinstall Codex Switcher.")
             return false
         }
 
@@ -35,12 +45,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
             pythonPath = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         }
         if pythonPath.isEmpty || !FileManager.default.isExecutableFile(atPath: pythonPath) {
-            // Fallback for a Python installation that moved after App installation.
             let candidates = ["/opt/homebrew/bin/python3", "/usr/local/bin/python3", "/usr/bin/python3"]
             pythonPath = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) ?? ""
         }
         guard !pythonPath.isEmpty else {
-            showFatal("No usable Python 3 installation was found. Install Python 3 and run scripts/install-app.sh again.")
+            showFatal("No usable Python 3 installation was found. Install Python 3 or use the self-contained Release build.")
             return false
         }
         return true
@@ -68,11 +77,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    private func configuredPort() -> Int {
+    private func makeServerProcess(arguments: [String]) -> Process? {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: pythonPath)
-        process.arguments = [serverURL.path, "--print-port"]
+        if let bundled = bundledServerURL {
+            process.executableURL = bundled
+            process.arguments = arguments
+        } else if let source = sourceServerURL {
+            process.executableURL = URL(fileURLWithPath: pythonPath)
+            process.arguments = [source.path] + arguments
+        } else {
+            return nil
+        }
         process.currentDirectoryURL = runtimeRoot
+        var env = ProcessInfo.processInfo.environment
+        env["PYTHONUNBUFFERED"] = "1"
+        env["CODEX_LAUNCHER_RUNTIME_ROOT"] = runtimeRoot.path
+        process.environment = env
+        return process
+    }
+
+    private func configuredPort() -> Int {
+        guard let process = makeServerProcess(arguments: ["--print-port"]) else { return 17831 }
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = Pipe()
@@ -98,19 +123,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
                 self.ownsServer = false
                 self.loadLauncher()
             } else {
-                self.startServer(port: port)
+                self.startServer()
             }
         }
     }
 
-    private func startServer(port: Int) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: pythonPath)
-        process.arguments = [serverURL.path]
-        process.currentDirectoryURL = runtimeRoot
-        var env = ProcessInfo.processInfo.environment
-        env["PYTHONUNBUFFERED"] = "1"
-        process.environment = env
+    private func startServer() {
+        guard let process = makeServerProcess(arguments: []) else {
+            showFatal("Unable to configure the bundled local service.")
+            return
+        }
 
         let logDir = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Logs/Codex Switcher", isDirectory: true)
@@ -130,7 +152,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
                 guard let self, self.ownsServer else { return }
                 self.ownsServer = false
                 if p.terminationStatus != 0 {
-                    self.showErrorPage("The local service exited with status \(p.terminationStatus). Quit and reopen Codex Switcher to retry.")
+                    self.showErrorPage("The local service exited with status \(p.terminationStatus). Quit and reopen Codex Switcher to retry. See ~/Library/Logs/Codex Switcher/native-app.log for details.")
                 }
             }
         }
@@ -146,7 +168,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
 
     private func waitForServer(attempt: Int) {
         guard let url = launcherURL else { return }
-        if attempt >= 60 {
+        if attempt >= 80 {
             showErrorPage("The local service timed out while starting. See ~/Library/Logs/Codex Switcher/native-app.log")
             return
         }
@@ -203,9 +225,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
         NSApp.terminate(nil)
     }
 
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        return false
-    }
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag {
@@ -222,9 +242,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
             while process.isRunning && Date() < deadline {
                 RunLoop.current.run(until: Date().addingTimeInterval(0.05))
             }
-            if process.isRunning {
-                process.interrupt()
-            }
+            if process.isRunning { process.interrupt() }
         }
     }
 }

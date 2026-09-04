@@ -12,7 +12,17 @@ from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse
 
-ROOT = Path(__file__).resolve().parents[1]
+def runtime_root():
+    explicit = os.environ.get("CODEX_LAUNCHER_RUNTIME_ROOT", "").strip()
+    if explicit:
+        return Path(explicit).expanduser().resolve()
+    if getattr(sys, "frozen", False):
+        # PyInstaller release binary lives at runtime/bin/CodexSwitcherServer.
+        # Keep static assets beside it at runtime/static.
+        return Path(sys.executable).resolve().parent.parent
+    return Path(__file__).resolve().parents[1]
+
+ROOT = runtime_root()
 STATIC = ROOT / "static"
 DATA_DIR = Path(os.environ.get("CODEX_LAUNCHER_DATA", str(Path.home() / "Library/Application Support/com.nigolarer.codex-switcher"))).expanduser()
 DB_PATH = DATA_DIR / "launcher.sqlite3"
@@ -22,7 +32,7 @@ HOST = os.environ.get("CODEX_LAUNCHER_HOST", "127.0.0.1")
 DEFAULT_PORT = 17831
 PORT_ENV = os.environ.get("CODEX_LAUNCHER_PORT")
 CHATGPT_APP = os.environ.get("CHATGPT_APP", "/Applications/ChatGPT.app")
-APP_VERSION = "0.18.0"
+APP_VERSION = "0.19.1"
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -566,6 +576,12 @@ def valid_color(s):
 
 
 class Handler(SimpleHTTPRequestHandler):
+    def __init__(self, *args, directory=None, **kwargs):
+        # Never let SimpleHTTPRequestHandler fall back to os.getcwd().
+        # A GUI app can inherit a cwd that is later moved/deleted, which would
+        # otherwise make new request handlers crash before routing begins.
+        super().__init__(*args, directory=str(STATIC), **kwargs)
+
     def log_message(self, fmt, *args):
         sys.stderr.write("[%s] %s\n" % (time.strftime("%H:%M:%S"), fmt % args))
 
@@ -623,7 +639,13 @@ class Handler(SimpleHTTPRequestHandler):
             path = self.path
 
             if path == "/api/launch":
-                launch_profile(str(d["id"]).strip().upper())
+                pid = str(d["id"]).strip().upper()
+                try:
+                    launch_profile(pid)
+                except Exception as launch_error:
+                    import traceback
+                    traceback.print_exc(file=sys.stderr)
+                    return self.send_json({"error": f"Failed to launch profile {pid}: {launch_error}"}, 500)
                 return self.send_json({"ok": True, **get_state()})
 
             if path == "/api/active":
@@ -864,6 +886,16 @@ def configured_port():
 
 def main():
     import threading
+    # Keep a stable cwd even if the app was opened from a folder that is later
+    # renamed, moved to Trash, or removed. Static serving does not depend on cwd,
+    # but third-party/stdlib helpers may still query it.
+    try:
+        os.chdir(ROOT if ROOT.is_dir() else DATA_DIR)
+    except OSError:
+        try:
+            os.chdir(DATA_DIR)
+        except OSError:
+            pass
     migrate_legacy_db_once()
     backup_existing_db_once_per_version()
     ensure_defaults()
