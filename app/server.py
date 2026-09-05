@@ -8,6 +8,7 @@ import sqlite3
 import subprocess
 import sys
 import time
+import threading
 import webbrowser
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
@@ -33,7 +34,7 @@ HOST = os.environ.get("CODEX_LAUNCHER_HOST", "127.0.0.1")
 DEFAULT_PORT = 17831
 PORT_ENV = os.environ.get("CODEX_LAUNCHER_PORT")
 CHATGPT_APP = os.environ.get("CHATGPT_APP", "/Applications/ChatGPT.app")
-APP_VERSION = "0.21.2"
+APP_VERSION = "0.22.5"
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -83,9 +84,13 @@ CREATE TABLE IF NOT EXISTS accounts (
   name TEXT NOT NULL,
   user_type TEXT NOT NULL DEFAULT 'Plus',
   weekly_remaining INTEGER NOT NULL DEFAULT 100 CHECK(weekly_remaining BETWEEN 0 AND 100),
+  five_hour_remaining INTEGER NOT NULL DEFAULT 100 CHECK(five_hour_remaining BETWEEN 0 AND 100),
   five_hour_reset_at INTEGER,
   weekly_reset_at INTEGER,
   reset_count INTEGER NOT NULL DEFAULT 0 CHECK(reset_count >= 0),
+  codex_account_id TEXT,
+  detected_plan_type TEXT,
+  last_synced_at INTEGER,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
@@ -124,7 +129,14 @@ DEFAULT_COLORS = {
 LAUNCHER_IDS = tuple(DEFAULT_COLORS)
 MAX_LAUNCHERS = len(LAUNCHER_IDS)
 MAX_ACCOUNTS = 20
+QUOTA_SYNC_INTERVALS = (5, 10, 30, 60)
+BACKGROUND_ACCOUNT_REFRESH_DEFAULT_HOURS = 6
+BACKGROUND_ACCOUNT_REFRESH_MIN_HOURS = 1
+BACKGROUND_ACCOUNT_REFRESH_MAX_HOURS = 720
+BACKGROUND_SWEEP_POLL_SECONDS = 30 * 60
 USER_TYPES = ("Plus", "Pro X10", "Pro X20", "Ultra")
+LAUNCHER_RUNTIME = {}
+CODEX_ACCOUNT_QUERY_LOCK = threading.RLock()
 
 
 def epoch():
@@ -254,10 +266,25 @@ def migrate_schema_v8(c):
         c.execute("ALTER TABLE accounts ADD COLUMN user_type TEXT NOT NULL DEFAULT 'Plus'")
 
 
+def migrate_schema_v9(c):
+    """Account identity binding + live Codex quota cache."""
+    cols = {r["name"] for r in c.execute("PRAGMA table_info(accounts)").fetchall()}
+    if "five_hour_remaining" not in cols:
+        c.execute("ALTER TABLE accounts ADD COLUMN five_hour_remaining INTEGER NOT NULL DEFAULT 100")
+    if "codex_account_id" not in cols:
+        c.execute("ALTER TABLE accounts ADD COLUMN codex_account_id TEXT")
+    if "detected_plan_type" not in cols:
+        c.execute("ALTER TABLE accounts ADD COLUMN detected_plan_type TEXT")
+    if "last_synced_at" not in cols:
+        c.execute("ALTER TABLE accounts ADD COLUMN last_synced_at INTEGER")
+    c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_codex_account_id ON accounts(codex_account_id) WHERE codex_account_id IS NOT NULL")
+
+
 def ensure_defaults():
     with conn() as c:
         migrate_profiles_to_v4(c)
         migrate_schema_v8(c)
+        migrate_schema_v9(c)
         # At least one human account mnemonic must exist.
         if c.execute("SELECT COUNT(*) n FROM accounts").fetchone()["n"] == 0:
             t = epoch()
@@ -297,6 +324,10 @@ def ensure_defaults():
             state_set(c, "welcome_seen", "0")
         if not state_get(c, "port"):
             state_set(c, "port", DEFAULT_PORT)
+        if not state_get(c, "quota_sync_interval_minutes"):
+            state_set(c, "quota_sync_interval_minutes", 5)
+        if not state_get(c, "background_account_refresh_hours"):
+            state_set(c, "background_account_refresh_hours", BACKGROUND_ACCOUNT_REFRESH_DEFAULT_HOURS)
         if state_get(c, "handoff_prompt") is None:
             state_set(c, "handoff_prompt", "")
         if state_get(c, "handoff_reply") is None:
@@ -316,6 +347,11 @@ def account_available(a):
         return False
     if int(a.get("weekly_remaining", 0)) <= 0:
         return False
+    # Synced Codex accounts always carry a *next* 5-hour reset timestamp, even
+    # while they still have quota. Use the real remaining percentage for those.
+    if a.get("codex_account_id"):
+        return int(a.get("five_hour_remaining", 0)) > 0
+    # Legacy/manual accounts use five_hour_reset_at as the local unavailable timer.
     reset_at = a.get("five_hour_reset_at")
     return not reset_at or int(reset_at) <= epoch()
 
@@ -330,20 +366,53 @@ def get_state():
     account_map = {a["id"]: a for a in accounts}
     active = st.get("active_launcher", "A")
     active_launcher = next((l for l in launchers if l["id"] == active), None)
-    active_account_id = active_launcher.get("account_id") if active_launcher else None
+    active_runtime = LAUNCHER_RUNTIME.get(active) or {}
+    active_account_id = active_runtime.get("bound_account_id") or (active_launcher.get("account_id") if active_launcher else None)
     enabled = [l for l in launchers if l["enabled"]]
 
     next_launcher = None
+    next_launcher_unavailable = False
+    next_launcher_available_at = None
     if enabled:
         ids = [l["id"] for l in enabled]
         start = ids.index(active) if active in ids else -1
         rotated = [enabled[(start + i) % len(enabled)] for i in range(1, len(enabled) + 1)]
-        # Prefer another usable account; falling back to same-account launcher only if necessary.
-        distinct = [l for l in rotated if l["id"] != active and l.get("account_id") != active_account_id and account_available(account_map.get(l.get("account_id")))]
-        fallback = [l for l in rotated if l["id"] != active and account_available(account_map.get(l.get("account_id")))]
-        choice = (distinct or fallback)
+        others = [l for l in rotated if l["id"] != active and account_map.get(l.get("account_id"))]
+        # First prefer an actually usable launcher on a distinct account.
+        distinct = [l for l in others if l.get("account_id") != active_account_id and account_available(account_map.get(l.get("account_id")))]
+        fallback = [l for l in others if account_available(account_map.get(l.get("account_id")))]
+        choice = distinct or fallback
         if choice:
             next_launcher = choice[0]["id"]
+        elif others:
+            # Never leave Suggested Next blank merely because every account is temporarily
+            # exhausted. Show the account that is expected to recover first.
+            def recovery_key(launcher_row):
+                account_row = account_map.get(launcher_row.get("account_id")) or {}
+                blockers = []
+                if int(account_row.get("weekly_remaining") or 0) <= 0:
+                    ts = account_row.get("weekly_reset_at")
+                    blockers.append(int(ts) if ts else 2**62)
+                five_ts = account_row.get("five_hour_reset_at")
+                five_blocked = (int(account_row.get("five_hour_remaining") or 0) <= 0) if account_row.get("codex_account_id") else bool(five_ts and int(five_ts) > epoch())
+                if five_blocked and five_ts and int(five_ts) > epoch():
+                    blockers.append(int(five_ts))
+                recovery = max(blockers) if blockers else epoch()
+                distinct_penalty = 0 if launcher_row.get("account_id") != active_account_id else 1
+                return (distinct_penalty, recovery, rotated.index(launcher_row))
+            candidate = min(others, key=recovery_key)
+            next_launcher = candidate["id"]
+            next_launcher_unavailable = True
+            a = account_map.get(candidate.get("account_id")) or {}
+            blockers = []
+            if int(a.get("weekly_remaining") or 0) <= 0 and a.get("weekly_reset_at"):
+                blockers.append(int(a["weekly_reset_at"]))
+            five_ts = a.get("five_hour_reset_at")
+            five_blocked = (int(a.get("five_hour_remaining") or 0) <= 0) if a.get("codex_account_id") else bool(five_ts and int(five_ts) > epoch())
+            if five_blocked and five_ts and int(five_ts) > epoch():
+                blockers.append(int(five_ts))
+            if blockers:
+                next_launcher_available_at = max(blockers)
 
     return {
         "launchers": launchers,
@@ -351,10 +420,13 @@ def get_state():
         "state": st,
         "history": history,
         "next_launcher": next_launcher,
+        "next_launcher_unavailable": next_launcher_unavailable,
+        "next_launcher_available_at": next_launcher_available_at,
         "db_path": str(DB_PATH),
         "max_launchers": MAX_LAUNCHERS,
         "max_accounts": MAX_ACCOUNTS,
         "labs": {"desktop_ui_backups": desktop_settings_backup_status()},
+        "launcher_runtime": {k: dict(v) for k, v in LAUNCHER_RUNTIME.items()},
         "server_time": epoch(),
         "version": APP_VERSION,
         "port": int(st.get("port", DEFAULT_PORT)),
@@ -391,13 +463,76 @@ def set_active_launcher(pid, reason="manual"):
             c.execute("DELETE FROM history WHERE id NOT IN (SELECT id FROM history ORDER BY id DESC LIMIT 6)")
 
 
+def _chatgpt_process_lines():
+    """Return ChatGPT/Codex Desktop process command lines without starting anything."""
+    try:
+        out = subprocess.check_output(["ps", "-axo", "command="], text=True, stderr=subprocess.DEVNULL)
+    except Exception:
+        return []
+    marker = "/ChatGPT.app/Contents/MacOS/ChatGPT"
+    return [line for line in out.splitlines() if marker in line]
+
+
+def is_launcher_running(pid):
+    """Best-effort check that the configured launcher is the currently running Desktop profile."""
+    pid = str(pid or "").strip().upper()
+    with conn() as c:
+        row = c.execute("SELECT * FROM launchers WHERE id=?", (pid,)).fetchone()
+    if not row:
+        return False
+    lines = _chatgpt_process_lines()
+    if not lines:
+        return False
+    if pid == "A":
+        # The system/default launcher has no explicit user-data-dir. Ignore helper
+        # processes belonging to an isolated profile.
+        return any("--user-data-dir=" not in line for line in lines)
+    data_dir = expand(row["desktop_data_dir"])
+    return bool(data_dir) and any((f"--user-data-dir={data_dir}" in line) or (data_dir in line) for line in lines)
+
+
+def sync_launcher_if_running(pid, reason="scheduled", quiet=False):
+    """Sync exactly one launcher, but only while that Desktop launcher is running."""
+    pid = str(pid or "").strip().upper()
+    if not pid or not is_launcher_running(pid):
+        return {"ok": False, "skipped": True, "reason": "launcher-not-running"}
+    try:
+        info = read_codex_account_info(pid)
+        with conn() as c:
+            state_set(c, "quota_last_auto_sync_at", epoch())
+            state_set(c, "quota_last_auto_sync_reason", reason)
+        return {"ok": True, "info": info}
+    except Exception as e:
+        if not quiet:
+            print(f"Quota sync ({reason}) failed for launcher {pid}: {e}", file=sys.stderr)
+        return {"ok": False, "error": str(e)}
+
+
+def _delayed_launcher_sync(pid, reason, delay=1.5):
+    """Give Desktop a moment to start before the first quota read."""
+    import threading
+    def run():
+        time.sleep(delay)
+        sync_launcher_if_running(pid, reason)
+    threading.Thread(target=run, daemon=True, name=f"quota-sync-{pid.lower()}-{reason}").start()
+
+
 def launch_profile(pid):
+    pid = str(pid or "").strip().upper()
     with conn() as c:
         p = c.execute("SELECT * FROM launchers WHERE id=? AND enabled=1", (pid,)).fetchone()
         if not p:
             raise ValueError("Unknown or disabled launcher")
+        previous = state_get(c, "active_launcher", "")
     if not Path(CHATGPT_APP).exists():
         raise RuntimeError(f"ChatGPT app not found at {CHATGPT_APP}")
+
+    # A launcher switch is also a close event for the currently running profile.
+    # Capture its final live quota before Desktop is terminated. Never wake an
+    # inactive profile just to refresh stale data.
+    if previous:
+        sync_launcher_if_running(previous, "before-switch-close", quiet=True)
+
     quit_chatgpt()
     if pid == "A":
         cmd = ["open", "-a", CHATGPT_APP]
@@ -410,6 +545,7 @@ def launch_profile(pid):
         cmd = ["open", "-n", "--env", f"CODEX_HOME={ch}", "-a", CHATGPT_APP, "--args", f"--user-data-dir={dd}"]
     subprocess.run(cmd, check=True)
     set_active_launcher(pid, "launch")
+    _delayed_launcher_sync(pid, "after-launch")
 
 
 
@@ -421,6 +557,9 @@ def close_current_launcher(pid):
             raise ValueError("Only the currently marked launcher can be closed")
         if not c.execute("SELECT 1 FROM launchers WHERE id=?", (pid,)).fetchone():
             raise ValueError("Unknown launcher")
+    # Final best-effort live snapshot happens before Desktop exits. If Desktop is
+    # already gone, this is skipped rather than spawning an app-server for it.
+    sync_launcher_if_running(pid, "before-close", quiet=True)
     quit_chatgpt()
     with conn() as c:
         state_set(c, "active_launcher", "")
@@ -575,6 +714,290 @@ def restore_launcher_desktop_settings(pid):
         "restored_from": str(backup),
         "config": str(config),
     }
+
+
+def codex_executable():
+    explicit = os.environ.get("CODEX_CLI", "").strip()
+    candidates = [
+        explicit,
+        str(Path(CHATGPT_APP) / "Contents/Resources/codex"),
+        "/Applications/ChatGPT.app/Contents/Resources/codex",
+    ]
+    for candidate in candidates:
+        if candidate and Path(candidate).is_file() and os.access(candidate, os.X_OK):
+            return candidate
+    found = shutil.which("codex")
+    if found:
+        return found
+    raise ValueError("Codex executable was not found")
+
+
+def _read_jsonrpc_response(proc, target_id, timeout=15):
+    """Read newline-delimited app-server output until the requested JSON-RPC response arrives."""
+    import select
+    deadline = time.time() + timeout
+    stdout_fd = proc.stdout.fileno()
+    stderr_fd = proc.stderr.fileno()
+    buffer = getattr(proc, "_codex_stdout_buffer", b"")
+    while time.time() < deadline:
+        # Consume all complete lines already buffered before waiting for more bytes.
+        while b"\n" in buffer:
+            raw, buffer = buffer.split(b"\n", 1)
+            if not raw.strip():
+                continue
+            try:
+                message = json.loads(raw.decode("utf-8", errors="replace"))
+            except json.JSONDecodeError:
+                continue
+            if message.get("id") == target_id:
+                proc._codex_stdout_buffer = buffer
+                return message
+        if proc.poll() is not None:
+            break
+        ready, _, _ = select.select([stdout_fd, stderr_fd], [], [], min(0.5, max(0.0, deadline - time.time())))
+        for fd in ready:
+            try:
+                chunk = os.read(fd, 65536)
+            except OSError:
+                chunk = b""
+            if not chunk:
+                continue
+            if fd == stdout_fd:
+                buffer += chunk
+            # stderr is intentionally drained but not treated as protocol data.
+    proc._codex_stdout_buffer = buffer
+    raise TimeoutError(f"Codex app-server did not respond to request {target_id}")
+
+
+def _read_codex_account_info_unlocked(pid, update_runtime=True):
+    """Ask Codex app-server for the account identity and rate limits for one launcher.
+
+    This intentionally does not read auth.json or any token itself. Codex owns authentication.
+    """
+    pid = str(pid).upper()
+    env = os.environ.copy()
+    env["CODEX_HOME"] = launcher_codex_home(pid)
+    proc = subprocess.Popen(
+        [codex_executable(), "app-server", "--stdio"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=False,
+        bufsize=0,
+        env=env,
+    )
+    try:
+        def send(payload):
+            proc.stdin.write((json.dumps(payload, separators=(",", ":")) + "\n").encode("utf-8"))
+            proc.stdin.flush()
+
+        send({"method": "initialize", "id": 1, "params": {"clientInfo": {"name": "codex-switcher", "version": APP_VERSION}}})
+        init = _read_jsonrpc_response(proc, 1, timeout=10)
+        if "error" in init:
+            raise ValueError(f"Codex initialize failed: {init['error']}")
+
+        send({"method": "account/rateLimits/read", "id": 2})
+        response = _read_jsonrpc_response(proc, 2, timeout=15)
+        if "error" in response:
+            raise ValueError(f"Codex rate limit read failed: {response['error']}")
+        result = response.get("result") or {}
+        limits = result.get("rateLimits") or {}
+        account_id = result.get("accountId")
+        if not account_id:
+            raise ValueError("Codex did not return an accountId; the launcher may not be signed in")
+
+        windows = [limits.get("primary"), limits.get("secondary")]
+        five = next((w for w in windows if w and int(w.get("windowDurationMins") or 0) == 300), None)
+        weekly = next((w for w in windows if w and int(w.get("windowDurationMins") or 0) == 10080), None)
+        reset_credits = result.get("rateLimitResetCredits") or {}
+        info = {
+            "launcher_id": pid,
+            "codex_account_id": str(account_id),
+            "plan_type": limits.get("planType"),
+            "five_hour_remaining": None if not five else max(0, min(100, 100 - int(five.get("usedPercent") or 0))),
+            "five_hour_used": None if not five else int(five.get("usedPercent") or 0),
+            "five_hour_reset_at": None if not five else five.get("resetsAt"),
+            "weekly_remaining": None if not weekly else max(0, min(100, 100 - int(weekly.get("usedPercent") or 0))),
+            "weekly_used": None if not weekly else int(weekly.get("usedPercent") or 0),
+            "weekly_reset_at": None if not weekly else weekly.get("resetsAt"),
+            "reset_count": int(reset_credits.get("availableCount") or 0),
+            "synced_at": epoch(),
+        }
+
+        with conn() as c:
+            bound = c.execute("SELECT * FROM accounts WHERE codex_account_id=?", (info["codex_account_id"],)).fetchone()
+            info["bound_account_id"] = bound["id"] if bound else None
+            info["bound_account_name"] = bound["name"] if bound else None
+            if bound:
+                fields = ["reset_count=?", "detected_plan_type=?", "last_synced_at=?", "updated_at=?"]
+                values = [info["reset_count"], info["plan_type"], info["synced_at"], info["synced_at"]]
+                if info["five_hour_remaining"] is not None:
+                    fields += ["five_hour_remaining=?", "five_hour_reset_at=?"]
+                    values += [info["five_hour_remaining"], info["five_hour_reset_at"]]
+                if info["weekly_remaining"] is not None:
+                    fields += ["weekly_remaining=?", "weekly_reset_at=?"]
+                    values += [info["weekly_remaining"], info["weekly_reset_at"]]
+                values.append(bound["id"])
+                c.execute(f"UPDATE accounts SET {','.join(fields)} WHERE id=?", tuple(values))
+        if update_runtime:
+            LAUNCHER_RUNTIME[pid] = info
+        return info
+    finally:
+        try:
+            proc.terminate()
+            proc.wait(timeout=2)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+
+
+def read_codex_account_info(pid, update_runtime=True):
+    # Serialize app-server account reads. Besides reducing process churn, this lets
+    # a background sweep re-check freshness after an active-launcher sync and avoid
+    # querying the same real account twice during the same startup window.
+    with CODEX_ACCOUNT_QUERY_LOCK:
+        return _read_codex_account_info_unlocked(pid, update_runtime=update_runtime)
+
+
+def quota_sync_interval_minutes():
+    with conn() as c:
+        try:
+            value = int(state_get(c, "quota_sync_interval_minutes", 5))
+        except (TypeError, ValueError):
+            value = 5
+    return value if value in QUOTA_SYNC_INTERVALS else 5
+
+
+def background_account_refresh_hours():
+    with conn() as c:
+        try:
+            value = int(state_get(c, "background_account_refresh_hours", BACKGROUND_ACCOUNT_REFRESH_DEFAULT_HOURS))
+        except (TypeError, ValueError):
+            value = BACKGROUND_ACCOUNT_REFRESH_DEFAULT_HOURS
+    if value < BACKGROUND_ACCOUNT_REFRESH_MIN_HOURS:
+        return BACKGROUND_ACCOUNT_REFRESH_DEFAULT_HOURS
+    return min(value, BACKGROUND_ACCOUNT_REFRESH_MAX_HOURS)
+
+
+def refresh_stale_bound_accounts(reason="background-sweep"):
+    """Refresh each stale bound account at most once, without launching Desktop GUI.
+
+    Accounts are deduplicated by the stable Codex accountId. A launcher is only a
+    transport for the query; the returned accountId is verified before the target
+    account is considered refreshed. Duplicate launchers for the same mnemonic are
+    tried only as fallbacks.
+    """
+    now = epoch()
+    stale_after = background_account_refresh_hours() * 60 * 60
+    with conn() as c:
+        accounts = rows_to_dict(c.execute(
+            "SELECT * FROM accounts WHERE codex_account_id IS NOT NULL AND codex_account_id<>'' ORDER BY id"
+        ).fetchall())
+        launchers = rows_to_dict(c.execute(
+            "SELECT * FROM launchers WHERE enabled=1 ORDER BY id"
+        ).fetchall())
+
+    due = []
+    for a in accounts:
+        last = int(a.get("last_synced_at") or 0)
+        if not last or now - last >= stale_after:
+            candidates = [l for l in launchers if l.get("account_id") == a.get("id")]
+            if candidates:
+                due.append((a, candidates))
+
+    refreshed_codex_ids = set()
+    attempted_launchers = set()
+    results = []
+    for account_row, candidates in due:
+        expected = str(account_row.get("codex_account_id") or "")
+        if not expected or expected in refreshed_codex_ids:
+            continue
+        matched = False
+        for launcher_row in candidates:
+            pid = str(launcher_row["id"]).upper()
+            if pid in attempted_launchers:
+                continue
+            attempted_launchers.add(pid)
+            try:
+                with CODEX_ACCOUNT_QUERY_LOCK:
+                    # Another path (usually the active launcher startup/interval sync) may
+                    # have refreshed this account while the sweep was waiting. Re-check
+                    # inside the same lock so a stale account is never queried twice.
+                    with conn() as c:
+                        latest = c.execute("SELECT last_synced_at FROM accounts WHERE id=?", (account_row["id"],)).fetchone()
+                    latest_at = int(latest["last_synced_at"] or 0) if latest else 0
+                    if latest_at and epoch() - latest_at < stale_after:
+                        matched = True
+                        break
+                    info = _read_codex_account_info_unlocked(pid, update_runtime=is_launcher_running(pid))
+                actual = str(info.get("codex_account_id") or "")
+                if actual:
+                    refreshed_codex_ids.add(actual)
+                results.append({"launcher_id": pid, "expected_account_id": expected, "actual_account_id": actual, "matched": actual == expected})
+                if actual == expected:
+                    matched = True
+                    break
+            except Exception as e:
+                results.append({"launcher_id": pid, "expected_account_id": expected, "error": str(e), "matched": False})
+        if not matched:
+            # Keep the target stale. A mismatching launcher may still have safely refreshed
+            # the account it actually contains; it is never written into the expected row.
+            pass
+    with conn() as c:
+        state_set(c, "background_account_last_sweep_at", now)
+        state_set(c, "background_account_last_sweep_reason", reason)
+    return {"ok": True, "due_accounts": len(due), "results": results}
+
+
+def sync_active_launcher_account(reason="scheduled"):
+    """Refresh only the currently active, actually running Desktop launcher."""
+    with conn() as c:
+        pid = str(state_get(c, "active_launcher", "") or "").strip().upper()
+    if not pid:
+        return {"ok": False, "skipped": True, "reason": "no-active-launcher"}
+    return sync_launcher_if_running(pid, reason)
+
+def bind_detected_account(pid, mnemonic_id):
+    pid = str(pid).upper()
+    mnemonic_id = int(mnemonic_id)
+    info = LAUNCHER_RUNTIME.get(pid)
+    if not info or epoch() - int(info.get("synced_at") or 0) > 120:
+        info = read_codex_account_info(pid)
+    codex_id = info["codex_account_id"]
+    with conn() as c:
+        target = c.execute("SELECT * FROM accounts WHERE id=?", (mnemonic_id,)).fetchone()
+        if not target:
+            raise ValueError("Unknown account mnemonic")
+        other = c.execute("SELECT id,name FROM accounts WHERE codex_account_id=? AND id<>?", (codex_id, mnemonic_id)).fetchone()
+        if other:
+            raise ValueError(f"This Codex account is already bound to mnemonic '{other['name']}'")
+        if target["codex_account_id"] and target["codex_account_id"] != codex_id:
+            raise ValueError("This mnemonic is already bound to another Codex account. Unbind it first.")
+        c.execute("UPDATE accounts SET codex_account_id=?,detected_plan_type=?,last_synced_at=?,updated_at=? WHERE id=?", (codex_id, info.get("plan_type"), epoch(), epoch(), mnemonic_id))
+        # Keep the launcher's selected mnemonic aligned with the binding the user just confirmed.
+        c.execute("UPDATE launchers SET account_id=?,updated_at=? WHERE id=?", (mnemonic_id, epoch(), pid))
+    info["bound_account_id"] = mnemonic_id
+    info["bound_account_name"] = target["name"]
+    LAUNCHER_RUNTIME[pid] = info
+    # Sync live quota values immediately now that the identity has a local account row.
+    read_codex_account_info(pid)
+    return get_state()
+
+
+def unbind_account(mnemonic_id):
+    mnemonic_id = int(mnemonic_id)
+    with conn() as c:
+        row = c.execute("SELECT * FROM accounts WHERE id=?", (mnemonic_id,)).fetchone()
+        if not row:
+            raise ValueError("Unknown account mnemonic")
+        c.execute("UPDATE accounts SET codex_account_id=NULL,detected_plan_type=NULL,last_synced_at=NULL,updated_at=? WHERE id=?", (epoch(), mnemonic_id))
+    for info in LAUNCHER_RUNTIME.values():
+        if info.get("bound_account_id") == mnemonic_id:
+            info["bound_account_id"] = None
+            info["bound_account_name"] = None
+    return get_state()
 
 
 def read_launcher_workspaces(pid):
@@ -747,6 +1170,41 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_json(get_state())
         if parsed.path == "/api/version":
             return self.send_json({"version": APP_VERSION})
+        if parsed.path == "/api/launcher/account-info":
+            try:
+                from urllib.parse import parse_qs
+                query = parse_qs(parsed.query)
+                pid = str((query.get("id") or [""])[0]).strip().upper()
+                manual = str((query.get("manual") or ["0"])[0]).lower() in ("1", "true", "yes")
+                with conn() as c:
+                    active = str(state_get(c, "active_launcher", "") or "").strip().upper()
+                    launcher_row = c.execute("SELECT * FROM launchers WHERE id=? AND enabled=1", (pid,)).fetchone()
+                    account_row = None
+                    if launcher_row and launcher_row["account_id"]:
+                        account_row = c.execute("SELECT * FROM accounts WHERE id=?", (launcher_row["account_id"],)).fetchone()
+                if not launcher_row:
+                    raise ValueError("Unknown or disabled launcher")
+                running_current = bool(active and pid == active and is_launcher_running(pid))
+                if not running_current:
+                    if not manual:
+                        raise ValueError("Quota sync is available only for the current running launcher")
+                    if not account_row or not account_row["codex_account_id"]:
+                        raise ValueError("Manual sync requires a bound account mnemonic")
+                    last = int(account_row["last_synced_at"] or 0)
+                    if last and epoch() - last <= 60:
+                        raise ValueError("This account was synced less than 1 minute ago")
+                info = read_codex_account_info(pid, update_runtime=running_current)
+                if running_current:
+                    with conn() as c:
+                        state_set(c, "quota_last_auto_sync_at", epoch())
+                        state_set(c, "quota_last_auto_sync_reason", "manual")
+                return self.send_json({"info": info, "state": get_state()})
+            except ValueError as e:
+                return self.send_json({"error": str(e)}, 400)
+            except TimeoutError as e:
+                return self.send_json({"error": str(e)}, 504)
+            except Exception as e:
+                return self.send_json({"error": str(e)}, 500)
         if parsed.path == "/api/workspaces":
             try:
                 from urllib.parse import parse_qs
@@ -817,6 +1275,18 @@ class Handler(SimpleHTTPRequestHandler):
                         if port < 1024 or port > 65535:
                             raise ValueError("Port must be between 1024 and 65535")
                         state_set(c, "port", port)
+                    sync_interval = d.get("quota_sync_interval_minutes")
+                    if sync_interval is not None:
+                        sync_interval = int(sync_interval)
+                        if sync_interval not in QUOTA_SYNC_INTERVALS:
+                            raise ValueError("Quota sync interval must be 5, 10, 30, or 60 minutes")
+                        state_set(c, "quota_sync_interval_minutes", sync_interval)
+                    background_hours = d.get("background_account_refresh_hours")
+                    if background_hours is not None:
+                        background_hours = int(background_hours)
+                        if background_hours < BACKGROUND_ACCOUNT_REFRESH_MIN_HOURS or background_hours > BACKGROUND_ACCOUNT_REFRESH_MAX_HOURS:
+                            raise ValueError("Background account refresh must be between 1 and 720 hours")
+                        state_set(c, "background_account_refresh_hours", background_hours)
                     if welcome_seen is not None:
                         state_set(c, "welcome_seen", "1" if bool(welcome_seen) else "0")
                 return self.send_json(get_state())
@@ -858,6 +1328,12 @@ class Handler(SimpleHTTPRequestHandler):
                         state_set(c, "active_launcher", "A")
                         state_set(c, "last_switch_at", epoch())
                 return self.send_json(get_state())
+
+            if path == "/api/account/bind":
+                return self.send_json(bind_detected_account(d.get("launcher_id"), d.get("account_id")))
+
+            if path == "/api/account/unbind":
+                return self.send_json(unbind_account(d.get("id")))
 
             if path == "/api/account":
                 name = str(d.get("name") or "").strip()
@@ -958,12 +1434,12 @@ class Handler(SimpleHTTPRequestHandler):
                         if int(row["reset_count"] or 0) <= 0:
                             raise ValueError("No reset count is available to consume")
                         c.execute(
-                            "UPDATE accounts SET weekly_remaining=100,five_hour_reset_at=NULL,reset_count=reset_count-1,updated_at=? WHERE id=?",
+                            "UPDATE accounts SET weekly_remaining=100,five_hour_remaining=100,five_hour_reset_at=NULL,reset_count=reset_count-1,updated_at=? WHERE id=?",
                             (epoch(), aid),
                         )
                     else:
                         c.execute(
-                            "UPDATE accounts SET weekly_remaining=100,five_hour_reset_at=NULL,updated_at=? WHERE id=?",
+                            "UPDATE accounts SET weekly_remaining=100,five_hour_remaining=100,five_hour_reset_at=NULL,updated_at=? WHERE id=?",
                             (epoch(), aid),
                         )
                 return self.send_json(get_state())
@@ -979,7 +1455,7 @@ class Handler(SimpleHTTPRequestHandler):
             if path == "/api/global/quota-reset":
                 with conn() as c:
                     now = epoch()
-                    c.execute("UPDATE accounts SET weekly_remaining=100,five_hour_reset_at=NULL,updated_at=?", (now,))
+                    c.execute("UPDATE accounts SET weekly_remaining=100,five_hour_remaining=100,five_hour_reset_at=NULL,updated_at=?", (now,))
                 return self.send_json(get_state())
 
             if path == "/api/global/reset-card":
@@ -1015,7 +1491,7 @@ def apply_due_weekly_resets(now=None):
             while next_at <= now:
                 next_at += week
             c.execute(
-                "UPDATE accounts SET weekly_remaining=100,five_hour_reset_at=NULL,weekly_reset_at=?,updated_at=? WHERE id=?",
+                "UPDATE accounts SET weekly_remaining=100,five_hour_remaining=100,five_hour_reset_at=NULL,weekly_reset_at=?,updated_at=? WHERE id=?",
                 (next_at, now, row["id"]),
             )
             changed += 1
@@ -1029,6 +1505,34 @@ def weekly_reset_worker(stop_event):
             apply_due_weekly_resets()
         except Exception as e:
             print(f"Weekly reset check failed: {e}", file=sys.stderr)
+
+
+def quota_sync_worker(stop_event):
+    # Poll the setting frequently enough that changing 60 -> 5 minutes takes effect quickly,
+    # while actual Codex syncs only run at the configured cadence.
+    while not stop_event.wait(15):
+        try:
+            with conn() as c:
+                try:
+                    last = int(state_get(c, "quota_last_auto_sync_at", 0) or 0)
+                except (TypeError, ValueError):
+                    last = 0
+            interval = quota_sync_interval_minutes() * 60
+            if epoch() - last >= interval:
+                sync_active_launcher_account("scheduled")
+        except Exception as e:
+            print(f"Scheduled quota sync failed: {e}", file=sys.stderr)
+
+
+def background_account_refresh_worker(stop_event):
+    # A sweep is intentionally cheap: every 30 minutes we only check timestamps.
+    # Codex app-server is started only for bound accounts whose successful sync is
+    # older than the user-configured account refresh window.
+    while not stop_event.wait(BACKGROUND_SWEEP_POLL_SECONDS):
+        try:
+            refresh_stale_bound_accounts("scheduled-background-sweep")
+        except Exception as e:
+            print(f"Background account refresh failed: {e}", file=sys.stderr)
 
 def configured_port():
     if PORT_ENV:
@@ -1047,7 +1551,6 @@ def configured_port():
 
 
 def main():
-    import threading
     # Keep a stable cwd even if the app was opened from a folder that is later
     # renamed, moved to Trash, or removed. Static serving does not depend on cwd,
     # but third-party/stdlib helpers may still query it.
@@ -1071,6 +1574,20 @@ def main():
     stop_event = threading.Event()
     reset_thread = threading.Thread(target=weekly_reset_worker, args=(stop_event,), daemon=True, name="weekly-reset-checker")
     reset_thread.start()
+    quota_thread = threading.Thread(target=quota_sync_worker, args=(stop_event,), daemon=True, name="quota-sync-scheduler")
+    quota_thread.start()
+    background_thread = threading.Thread(target=background_account_refresh_worker, args=(stop_event,), daemon=True, name="background-account-refresh")
+    background_thread.start()
+    # Startup has two independent refresh paths:
+    # 1) the active running launcher gets an immediate live sync;
+    # 2) a low-frequency account sweep checks only bound accounts that are stale
+    #    beyond the configured refresh window. The sweep may briefly start Codex
+    #    app-server for an inactive profile, but never launches the Desktop GUI.
+    # Do not advance quota_last_auto_sync_at before the startup sync actually succeeds.
+    # If Desktop is still starting, the scheduler should be free to retry on its next
+    # 15-second poll instead of waiting a full configured interval.
+    threading.Thread(target=lambda: sync_active_launcher_account("switcher-startup"), daemon=True, name="quota-sync-startup").start()
+    threading.Thread(target=lambda: refresh_stale_bound_accounts("switcher-startup-sweep"), daemon=True, name="background-account-startup-sweep").start()
     if "--open" in sys.argv:
         # Open after the server has had a moment to bind.
         threading.Timer(0.6, lambda: webbrowser.open(f"http://{HOST}:{listen_port}/?v={APP_VERSION}")).start()
@@ -1094,6 +1611,12 @@ def main():
         pass
     finally:
         stop_event.set()
+        # A final best-effort snapshot is limited to the active running launcher.
+        # Inactive launchers are never awakened just because Switcher exits.
+        try:
+            sync_active_launcher_account("switcher-shutdown")
+        except Exception as e:
+            print(f"Shutdown quota sync failed: {e}", file=sys.stderr)
         server.server_close()
 
 
