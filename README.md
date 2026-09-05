@@ -54,7 +54,7 @@ Account aliases are local labels only. They are not verified OpenAI identities, 
 Download:
 
 ```text
-Codex-Switcher-v0.22.3-macOS-arm64.zip
+Codex-Switcher-v0.22.4-macOS-arm64.zip
 ```
 
 Then:
@@ -88,7 +88,7 @@ The build script:
 Output:
 
 ```text
-release/Codex-Switcher-v0.22.3-macOS-arm64.zip
+release/Codex-Switcher-v0.22.4-macOS-arm64.zip
 ```
 
 ### Local development install
@@ -244,13 +244,13 @@ A future Developer ID signed and notarized build can remove this extra step.
 Current public release:
 
 ```text
-v0.22.3
+v0.22.4
 ```
 
 Release asset:
 
 ```text
-Codex-Switcher-v0.22.3-macOS-arm64.zip
+Codex-Switcher-v0.22.4-macOS-arm64.zip
 ```
 
 ### v0.21.2 stale backend fix
@@ -259,13 +259,12 @@ The native app now verifies both the backend version and the static UI before re
 
 ## Release notes
 
-### v0.22.3 bound-quota read-only + UI polish
+### v0.22.4 official sync age + bound-account interaction polish
 
-- Once a real account is bound, weekly and 5-hour remaining sliders are read-only. The backend also rejects manual quota writes for bound accounts; use **Sync now** instead.
-- Quota sliders are custom-drawn so their launcher accent color remains visible when the app window loses focus instead of turning gray under macOS/WebKit.
-- Suggested-next low-quota warnings use a softer, more translucent red treatment for a lightweight caution rather than a high-severity alert.
-- Launcher-list **Bound** and Plus / Pro membership badges are grouped together at the right edge so Bound sits immediately to the left of the plan badge.
-- Adds more breathing room between Reset count and the lower divider to balance the action-area spacing.
+- Bound accounts now show relative official-sync age: “Just synced” for the first 5 minutes, then 5/30 minutes ago, N hours ago, or N days ago.
+- The same line now shows the next scheduled official sync as HH:MM only.
+- Bound accounts are automatically refreshed from the official quota endpoint every 30 minutes; failed background syncs retry after 5 minutes.
+- For a bound account in Current launcher, the manual Start / Restart 5H countdown button is hidden and only **Sync now** remains, avoiding conflicting local/manual timing with official quota data.
 
 ### v0.22.1 binding persistence + attention-state UI
 

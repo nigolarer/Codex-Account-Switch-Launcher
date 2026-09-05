@@ -35,7 +35,7 @@ HOST = os.environ.get("CODEX_LAUNCHER_HOST", "127.0.0.1")
 DEFAULT_PORT = 17831
 PORT_ENV = os.environ.get("CODEX_LAUNCHER_PORT")
 CHATGPT_APP = os.environ.get("CHATGPT_APP", "/Applications/ChatGPT.app")
-APP_VERSION = "0.22.3"
+APP_VERSION = "0.22.4"
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -264,7 +264,7 @@ def migrate_schema_v8(c):
         c.execute("ALTER TABLE accounts ADD COLUMN user_type TEXT NOT NULL DEFAULT 'Plus'")
     if "five_hour_remaining" not in cols:
         c.execute("ALTER TABLE accounts ADD COLUMN five_hour_remaining INTEGER NOT NULL DEFAULT 100")
-    # v0.22.3: persist real Codex/ChatGPT account binding in the stable user DB.
+    # v0.22.4: persist real Codex/ChatGPT account binding in the stable user DB.
     # These fields intentionally store identifiers/metadata only, never OAuth tokens.
     for name, decl in (
         ("bound_account_id", "TEXT"),
