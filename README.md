@@ -11,6 +11,8 @@ It is designed for people who use more than one Codex account on the same Mac an
 
 ## Highlights
 
+- Up to six local launchers (A–F); A remains the system-default launcher and B–F can be isolated.
+
 - Native macOS AppKit + WKWebView app; no Electron runtime.
 - Apple Silicon (`arm64`) support.
 - The app starts and stops its own local backend automatically.
@@ -18,6 +20,7 @@ It is designed for people who use more than one Codex account on the same Mac an
 - Additional launchers can use isolated `CODEX_HOME` and Desktop `user-data-dir` values.
 - Multiple launchers can point to the same local workspaces.
 - Local account aliases and membership labels.
+- Up to 20 account mnemonics; add controls disable clearly at the limit.
 - Weekly quota tracking and reset scheduling.
 - 5-hour reset countdown and custom reset-time correction.
 - Reset-card tracking and global reset actions.
@@ -27,6 +30,11 @@ It is designed for people who use more than one Codex account on the same Mac an
 - English and Simplified Chinese.
 - First-launch Welcome panel with privacy and usage explanations.
 - Custom Codex Switcher macOS app icon.
+- Labs: safely reset Codex Desktop UI settings per launcher with automatic config backup and one-click restore.
+- Animated current / suggested / preview launcher deck for smoother profile handoffs.
+- Snap points on weekly quota sliders.
+- Persistent **Next Codex Hand Off** scratchpad for carrying context between accounts.
+- Editable 5-hour reset time directly from the current launcher panel.
 
 ## How it works
 
@@ -35,7 +43,7 @@ Codex Switcher separates **launch profiles** from **account labels**.
 A launcher controls how ChatGPT / Codex Desktop starts:
 
 - **Launcher A** uses the normal system/default ChatGPT launch.
-- **Launcher B/C** can use isolated `CODEX_HOME` and Desktop `user-data-dir` locations.
+- **Launchers B–F** can use isolated `CODEX_HOME` and Desktop `user-data-dir` locations.
 
 Account aliases are local labels only. They are not verified OpenAI identities, so you can manually change which account label is associated with a launcher if you sign into a different account inside that profile.
 
@@ -46,7 +54,7 @@ Account aliases are local labels only. They are not verified OpenAI identities, 
 Download:
 
 ```text
-Codex-Switcher-v0.19.3-macOS-arm64.zip
+Codex-Switcher-v0.21.2-macOS-arm64.zip
 ```
 
 Then:
@@ -74,12 +82,13 @@ The build script:
 - generates and embeds the macOS app icon;
 - applies an ad-hoc signature;
 - verifies the native shell and bundled backend are arm64;
-- creates the GitHub Release asset under `release/`.
+- creates the GitHub Release asset under `release/`;
+- keeps the PyInstaller build environment in a stable user Cache location, so renaming or moving the source checkout does not invalidate an old project-local virtualenv.
 
 Output:
 
 ```text
-release/Codex-Switcher-v0.19.3-macOS-arm64.zip
+release/Codex-Switcher-v0.21.2-macOS-arm64.zip
 ```
 
 ### Local development install
@@ -235,11 +244,15 @@ A future Developer ID signed and notarized build can remove this extra step.
 Current public release:
 
 ```text
-v0.19.3
+v0.21.2
 ```
 
 Release asset:
 
 ```text
-Codex-Switcher-v0.19.3-macOS-arm64.zip
+Codex-Switcher-v0.21.2-macOS-arm64.zip
 ```
+
+### v0.21.2 stale backend fix
+
+The native app now verifies both the backend version and the static UI before reusing an existing local service. If an older Codex Switcher backend is still listening after the source folder was renamed or moved, the app safely replaces that stale backend instead of attaching to it and showing a 404 page. Release builds also validate that `runtime/static/index.html` is present.

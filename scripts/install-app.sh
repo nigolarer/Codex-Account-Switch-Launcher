@@ -135,8 +135,8 @@ cat > "$CONTENTS/Info.plist" <<'PLIST_EOF'
   <key>CFBundleName</key><string>Codex Switcher</string>
   <key>CFBundleDisplayName</key><string>Codex Switcher</string>
   <key>CFBundleIdentifier</key><string>com.nigolarer.codex-switcher</string>
-  <key>CFBundleVersion</key><string>0.19.3</string>
-  <key>CFBundleShortVersionString</key><string>0.19.3</string>
+  <key>CFBundleVersion</key><string>0.21.2</string>
+  <key>CFBundleShortVersionString</key><string>0.21.2</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleExecutable</key><string>CodexAccountSwitcher</string>
   <key>CFBundleIconFile</key><string>AppIcon.icns</string>
@@ -148,6 +148,10 @@ PLIST_EOF
 # Bundle all runtime code and web assets so the installed App does not depend on the source tree.
 cp -p "$ROOT/app/server.py" "$RUNTIME/app/server.py"
 cp -R "$ROOT/static/." "$RUNTIME/static/"
+if [[ ! -f "$RUNTIME/static/index.html" ]]; then
+  echo "Install validation failed: runtime/static/index.html is missing."
+  exit 1
+fi
 printf '%s\n' "$PYTHON_BIN" > "$RESOURCES/python-path.txt"
 generate_app_icon
 

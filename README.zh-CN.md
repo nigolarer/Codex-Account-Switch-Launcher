@@ -11,6 +11,8 @@ Codex Switcher 是一个轻量级 macOS 应用，用于在多个本地 Codex / C
 
 ## 主要功能
 
+- 最多 6 个本地启动台（A–F）；A 保持系统默认启动方式，B–F 可配置为相互隔离的 Codex Profile。
+
 - 原生 macOS AppKit + WKWebView 应用，不使用 Electron。
 - 支持 Apple Silicon（`arm64`）。
 - App 启动时自动启动本地后台，退出 App 时自动停止后台。
@@ -18,6 +20,7 @@ Codex Switcher 是一个轻量级 macOS 应用，用于在多个本地 Codex / C
 - 其他启动台可分别使用独立的 `CODEX_HOME` 和 Desktop `user-data-dir`。
 - 多个启动台可以访问相同的本地工作区。
 - 本地账户助记符和会员类型标签。
+- 最多支持 20 个账户助记符，达到上限后新增控件会明确置灰并提示。
 - 周额度记录和周重置时间管理。
 - 5 小时重置倒计时以及自定义重置时间修正。
 - 可重置次数管理和全局重置操作。
@@ -27,6 +30,11 @@ Codex Switcher 是一个轻量级 macOS 应用，用于在多个本地 Codex / C
 - 支持 English 和简体中文。
 - 首次启动欢迎说明面板。
 - 自定义 Codex Switcher macOS App 图标。
+- 实验室：可按启动台安全重置 Codex Desktop UI 设置，自动备份 config.toml，并支持一键还原。
+- 顶部当前 / 建议 / 预览启动台支持平滑切换动画。
+- 周剩余滑块支持关键百分比吸附点。
+- 提供持久化的 **Next Codex Hand Off** 会话交接暂存台。
+- 可直接在当前启动台区域编辑 5 小时下次重置时间。
 
 ## 工作原理
 
@@ -35,7 +43,7 @@ Codex Switcher 将 **启动台 Profile** 与 **账户助记符** 分离管理。
 启动台决定 ChatGPT / Codex Desktop 如何启动：
 
 - **启动台 A**：使用系统默认的 ChatGPT 启动方式。
-- **启动台 B/C**：可以使用独立的 `CODEX_HOME` 和 Desktop `user-data-dir`。
+- **启动台 B–F**：可以分别使用独立的 `CODEX_HOME` 和 Desktop `user-data-dir`。
 
 账户助记符只是本地人工标签，不会验证真实 OpenAI 账号身份。
 
@@ -48,7 +56,7 @@ Codex Switcher 将 **启动台 Profile** 与 **账户助记符** 分离管理。
 下载：
 
 ```text
-Codex-Switcher-v0.19.3-macOS-arm64.zip
+Codex-Switcher-v0.21.2-macOS-arm64.zip
 ```
 
 然后：
@@ -76,12 +84,13 @@ Codex-Switcher-v0.19.3-macOS-arm64.zip
 - 自动生成并嵌入 macOS App 图标；
 - 执行 ad-hoc codesign；
 - 验证原生程序和后台程序均为 arm64；
-- 在 `release/` 中生成 GitHub Release 安装包。
+- 在 `release/` 中生成 GitHub Release 安装包；
+- 将 PyInstaller 构建环境放在稳定的用户 Cache 目录中，因此源码工程改名或移动后，不会因为旧虚拟环境中的绝对路径而失效。
 
 输出：
 
 ```text
-release/Codex-Switcher-v0.19.3-macOS-arm64.zip
+release/Codex-Switcher-v0.21.2-macOS-arm64.zip
 ```
 
 ### 本地开发安装
@@ -239,11 +248,15 @@ tokens
 当前公开版本：
 
 ```text
-v0.19.3
+v0.21.2
 ```
 
 Release 安装包：
 
 ```text
-Codex-Switcher-v0.19.3-macOS-arm64.zip
+Codex-Switcher-v0.21.2-macOS-arm64.zip
 ```
+
+### v0.21.2 旧后台进程修复
+
+原生 App 现在会同时检查后台版本和静态界面是否可用，不再只凭 `/api/version` 的 200 响应复用旧服务。如果源码目录改名或移动后仍残留旧的 Codex Switcher 后台进程，新版会安全替换这个失效后台，而不是附着后显示 404。Release 构建阶段也会强制校验 `runtime/static/index.html` 是否存在。

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-VERSION="0.19.3"
+VERSION="0.21.2"
 PRODUCT="Codex Switcher"
 APP_NAME="$PRODUCT.app"
 BUILD_ROOT="$ROOT/build/release"
@@ -87,14 +87,23 @@ if [[ "$PY_ARCH" != "arm64" ]]; then
   exit 1
 fi
 
-VENV="$ROOT/.release-venv"
-if [[ ! -x "$VENV/bin/python" ]]; then
+# Keep the release build environment outside the source checkout. Python console
+# scripts inside a venv embed their venv path in the shebang, so a project-local
+# venv can break when the repository folder is renamed or moved.
+BUILD_CACHE_ROOT="${CODEX_SWITCHER_BUILD_CACHE:-$HOME/Library/Caches/com.nigolarer.codex-switcher/build}"
+VENV="$BUILD_CACHE_ROOT/release-venv"
+mkdir -p "$BUILD_CACHE_ROOT"
+
+if [[ ! -x "$VENV/bin/python" ]] \
+  || ! "$VENV/bin/python" -c 'import sys; print(sys.prefix)' >/dev/null 2>&1 \
+  || [[ "$("$VENV/bin/python" -c 'import platform; print(platform.machine())' 2>/dev/null || true)" != "arm64" ]]; then
   echo "Creating release build environment..."
+  rm -rf "$VENV"
   "$PYTHON_BIN" -m venv "$VENV"
 fi
 
 if ! "$VENV/bin/python" -c 'import PyInstaller' >/dev/null 2>&1; then
-  echo "Installing PyInstaller into the local release build environment..."
+  echo "Installing PyInstaller into the release build environment..."
   "$VENV/bin/python" -m pip install --upgrade pip pyinstaller
 fi
 
@@ -109,7 +118,7 @@ mkdir -p "$MACOS" "$RESOURCES" "$RUNTIME/static" "$RELEASE_DIR"
 
 # Bundle the backend as a self-contained arm64 executable directory.
 echo "Bundling local backend runtime..."
-MACOSX_DEPLOYMENT_TARGET=13.0 "$VENV/bin/pyinstaller" \
+MACOSX_DEPLOYMENT_TARGET=13.0 "$VENV/bin/python" -m PyInstaller \
   --noconfirm \
   --clean \
   --onedir \
@@ -166,6 +175,10 @@ if [[ ! -f "$ICON_FILE" ]]; then
 fi
 if [[ ! -x "$RUNTIME/server/CodexSwitcherServer" ]]; then
   echo "Release validation failed: bundled backend executable is missing."
+  exit 1
+fi
+if [[ ! -f "$RUNTIME/static/index.html" ]]; then
+  echo "Release validation failed: runtime/static/index.html is missing."
   exit 1
 fi
 

@@ -1,5 +1,6 @@
 import Cocoa
 import WebKit
+import Darwin
 
 final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate {
     private var window: NSWindow!
@@ -118,15 +119,110 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         let port = configuredPort()
         guard let url = URL(string: "http://127.0.0.1:\(port)/") else { return }
         launcherURL = url
-        probe(url: url) { [weak self] running in
+
+        inspectExistingServer(url: url) { [weak self] state in
             guard let self else { return }
-            if running {
+            switch state {
+            case .currentAndHealthy:
                 self.ownsServer = false
                 self.loadLauncher()
-            } else {
+            case .codexSwitcherButStale:
+                // A server from an older/moved source checkout can keep /api/version
+                // alive while its static directory has disappeared. Reclaim the port,
+                // but only when the listener is positively identified as our backend.
+                if self.terminateKnownCodexSwitcherListener(port: port) {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                        self.startServer()
+                    }
+                } else {
+                    self.showErrorPage("Port \(port) is occupied by a stale Codex Switcher service that could not be stopped. Quit old Codex Switcher instances and reopen this app.")
+                }
+            case .notCodexSwitcher:
                 self.startServer()
             }
         }
+    }
+
+    private enum ExistingServerState {
+        case currentAndHealthy
+        case codexSwitcherButStale
+        case notCodexSwitcher
+    }
+
+    private func currentAppVersion() -> String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
+    }
+
+    private func inspectExistingServer(url: URL, completion: @escaping (ExistingServerState) -> Void) {
+        var versionRequest = URLRequest(url: url.appendingPathComponent("api/version"))
+        versionRequest.timeoutInterval = 0.6
+        URLSession.shared.dataTask(with: versionRequest) { data, response, _ in
+            guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode,
+                  let data,
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let version = obj["version"] as? String else {
+                DispatchQueue.main.async { completion(.notCodexSwitcher) }
+                return
+            }
+
+            var rootRequest = URLRequest(url: url)
+            rootRequest.timeoutInterval = 0.6
+            rootRequest.cachePolicy = .reloadIgnoringLocalCacheData
+            URLSession.shared.dataTask(with: rootRequest) { _, rootResponse, _ in
+                let rootOK = (rootResponse as? HTTPURLResponse).map { 200..<300 ~= $0.statusCode } ?? false
+                let state: ExistingServerState = (version == self.currentAppVersion() && rootOK)
+                    ? .currentAndHealthy
+                    : .codexSwitcherButStale
+                DispatchQueue.main.async { completion(state) }
+            }.resume()
+        }.resume()
+    }
+
+    private func terminateKnownCodexSwitcherListener(port: Int) -> Bool {
+        let candidates = ["/usr/sbin/lsof", "/usr/bin/lsof"]
+        guard let lsofPath = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else {
+            return false
+        }
+
+        let lsof = Process()
+        let output = Pipe()
+        lsof.executableURL = URL(fileURLWithPath: lsofPath)
+        lsof.arguments = ["-nP", "-tiTCP:\(port)", "-sTCP:LISTEN"]
+        lsof.standardOutput = output
+        lsof.standardError = Pipe()
+        do {
+            try lsof.run()
+            lsof.waitUntilExit()
+        } catch {
+            return false
+        }
+
+        let raw = String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let pids = raw.split(whereSeparator: \.isWhitespace).compactMap { Int32($0) }
+        var stoppedAny = false
+
+        for pid in pids {
+            let ps = Process()
+            let psOutput = Pipe()
+            ps.executableURL = URL(fileURLWithPath: "/bin/ps")
+            ps.arguments = ["-p", String(pid), "-o", "command="]
+            ps.standardOutput = psOutput
+            ps.standardError = Pipe()
+            do {
+                try ps.run()
+                ps.waitUntilExit()
+            } catch {
+                continue
+            }
+            let command = String(data: psOutput.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            let lower = command.lowercased()
+            let knownBackend = command.contains("CodexSwitcherServer") ||
+                (lower.contains("server.py") && (lower.contains("codex-switcher") || lower.contains("codex-account-switch")))
+            if knownBackend && Darwin.kill(pid, SIGTERM) == 0 {
+                stoppedAny = true
+            }
+        }
+        return stoppedAny
     }
 
     private func startServer() {

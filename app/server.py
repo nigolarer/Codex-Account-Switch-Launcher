@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import os
+import re
 import shutil
 import signal
 import sqlite3
@@ -32,7 +33,7 @@ HOST = os.environ.get("CODEX_LAUNCHER_HOST", "127.0.0.1")
 DEFAULT_PORT = 17831
 PORT_ENV = os.environ.get("CODEX_LAUNCHER_PORT")
 CHATGPT_APP = os.environ.get("CHATGPT_APP", "/Applications/ChatGPT.app")
-APP_VERSION = "0.19.3"
+APP_VERSION = "0.21.2"
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -112,7 +113,17 @@ CREATE TABLE IF NOT EXISTS history (
 );
 """
 
-DEFAULT_COLORS = {"A": "#76D5CF", "B": "#D0DF5D", "C": "#A9669C"}
+DEFAULT_COLORS = {
+    "A": "#76D5CF",
+    "B": "#D0DF5D",
+    "C": "#A9669C",
+    "D": "#F0A35A",
+    "E": "#5E9FE6",
+    "F": "#E66E73",
+}
+LAUNCHER_IDS = tuple(DEFAULT_COLORS)
+MAX_LAUNCHERS = len(LAUNCHER_IDS)
+MAX_ACCOUNTS = 20
 USER_TYPES = ("Plus", "Pro X10", "Pro X20", "Ultra")
 
 
@@ -175,7 +186,7 @@ def migrate_profiles_to_v4(c):
         memo_to_account = {}
         for p in old_profiles:
             pid = str(p.get("id", "")).upper()
-            if pid not in ("A", "B", "C"):
+            if pid not in LAUNCHER_IDS:
                 continue
             memo = (p.get("memo") or f"账号 {pid}").strip()
             quota = int(p.get("remaining_quota", 100) or 100)
@@ -286,6 +297,10 @@ def ensure_defaults():
             state_set(c, "welcome_seen", "0")
         if not state_get(c, "port"):
             state_set(c, "port", DEFAULT_PORT)
+        if state_get(c, "handoff_prompt") is None:
+            state_set(c, "handoff_prompt", "")
+        if state_get(c, "handoff_reply") is None:
+            state_set(c, "handoff_reply", "")
 
         # Cap persisted switch history, including records created by older versions.
         if table_exists(c, "history"):
@@ -337,7 +352,9 @@ def get_state():
         "history": history,
         "next_launcher": next_launcher,
         "db_path": str(DB_PATH),
-        "max_launchers": 3,
+        "max_launchers": MAX_LAUNCHERS,
+        "max_accounts": MAX_ACCOUNTS,
+        "labs": {"desktop_ui_backups": desktop_settings_backup_status()},
         "server_time": epoch(),
         "version": APP_VERSION,
         "port": int(st.get("port", DEFAULT_PORT)),
@@ -441,6 +458,123 @@ def launcher_codex_home(pid):
         if not raw:
             raise ValueError("Launcher has no CODEX_HOME configured")
         return expand(raw)
+
+
+def desktop_settings_backup_dir(pid):
+    pid = str(pid).strip().upper()
+    return DATA_DIR / "backups" / "desktop-settings" / pid
+
+
+def latest_desktop_settings_backup(pid):
+    backup_dir = desktop_settings_backup_dir(pid)
+    if not backup_dir.is_dir():
+        return None
+    backups = sorted(backup_dir.glob("config-*.toml"), reverse=True)
+    return backups[0] if backups else None
+
+
+def desktop_settings_backup_status():
+    result = {}
+    try:
+        with conn() as c:
+            launcher_ids = [r["id"] for r in c.execute("SELECT id FROM launchers WHERE enabled=1 ORDER BY id").fetchall()]
+    except Exception:
+        launcher_ids = list(LAUNCHER_IDS)
+    for pid in launcher_ids:
+        path = latest_desktop_settings_backup(pid)
+        result[pid] = {
+            "available": bool(path),
+            "path": str(path) if path else "",
+            "modified_at": int(path.stat().st_mtime) if path and path.exists() else None,
+        }
+    return result
+
+
+def reset_launcher_desktop_settings(pid):
+    """Back up config.toml, then remove only [desktop] and [desktop.*] tables."""
+    pid = str(pid).strip().upper()
+    with conn() as c:
+        active = state_get(c, "active_launcher", "")
+    if active == pid:
+        quit_chatgpt()
+    home = Path(launcher_codex_home(pid))
+    config = home / "config.toml"
+    if not config.is_file():
+        raise ValueError(f"config.toml was not found for launcher {pid}: {config}")
+
+    backup_dir = desktop_settings_backup_dir(pid)
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    backup = backup_dir / f"config-{stamp}.toml"
+    shutil.copy2(config, backup)
+
+    text = config.read_text(encoding="utf-8")
+    lines = text.splitlines(keepends=True)
+    output = []
+    skipping = False
+    removed_sections = []
+    section_re = re.compile(r"^\s*\[([^\]]+)\]\s*(?:#.*)?$")
+
+    for line in lines:
+        match = section_re.match(line.rstrip("\\r\\n"))
+        if match:
+            section = match.group(1).strip()
+            is_desktop = section == "desktop" or section.startswith("desktop.")
+            if is_desktop:
+                skipping = True
+                removed_sections.append(section)
+                continue
+            skipping = False
+        if not skipping:
+            output.append(line)
+
+    if not removed_sections:
+        return {
+            "launcher_id": pid,
+            "changed": False,
+            "backup": str(backup),
+            "config": str(config),
+            "removed_sections": [],
+        }
+
+    tmp = config.with_name(config.name + ".codex-switcher-tmp")
+    tmp.write_text("".join(output), encoding="utf-8")
+    os.replace(tmp, config)
+    return {
+        "launcher_id": pid,
+        "changed": True,
+        "backup": str(backup),
+        "config": str(config),
+        "removed_sections": removed_sections,
+    }
+
+
+def restore_launcher_desktop_settings(pid):
+    """Restore the most recent config.toml backup created by the Labs repair tool."""
+    pid = str(pid).strip().upper()
+    backup = latest_desktop_settings_backup(pid)
+    if not backup:
+        raise ValueError(f"No Desktop UI backup is available for launcher {pid}")
+    with conn() as c:
+        active = state_get(c, "active_launcher", "")
+    if active == pid:
+        quit_chatgpt()
+    home = Path(launcher_codex_home(pid))
+    config = home / "config.toml"
+    home.mkdir(parents=True, exist_ok=True)
+
+    # Preserve the current post-repair config before restoration as an emergency rollback copy.
+    rollback_dir = desktop_settings_backup_dir(pid)
+    if config.exists():
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        rollback = rollback_dir / f"pre-restore-{stamp}.toml"
+        shutil.copy2(config, rollback)
+    shutil.copy2(backup, config)
+    return {
+        "launcher_id": pid,
+        "restored_from": str(backup),
+        "config": str(config),
+    }
 
 
 def read_launcher_workspaces(pid):
@@ -689,8 +823,8 @@ class Handler(SimpleHTTPRequestHandler):
 
             if path == "/api/launcher":
                 pid = str(d["id"]).strip().upper()
-                if pid not in ("A", "B", "C"):
-                    raise ValueError("Launcher ID must be A, B, or C")
+                if pid not in LAUNCHER_IDS:
+                    raise ValueError("Launcher ID must be between A and F")
                 color = valid_color(d.get("theme_color") or DEFAULT_COLORS[pid])
                 account_id = d.get("account_id")
                 account_id = int(account_id) if account_id not in (None, "", 0, "0") else None
@@ -709,8 +843,8 @@ class Handler(SimpleHTTPRequestHandler):
                         if existing:
                             c.execute("UPDATE launchers SET codex_home=?,desktop_data_dir=?,theme_color=?,account_id=?,enabled=1,updated_at=? WHERE id=?", (ch, dd, color, account_id, t, pid))
                         else:
-                            if c.execute("SELECT COUNT(*) n FROM launchers").fetchone()["n"] >= 3:
-                                raise ValueError("Maximum 3 launchers")
+                            if c.execute("SELECT COUNT(*) n FROM launchers").fetchone()["n"] >= MAX_LAUNCHERS:
+                                raise ValueError(f"Maximum {MAX_LAUNCHERS} launchers")
                             c.execute("INSERT INTO launchers(id,codex_home,desktop_data_dir,theme_color,account_id,enabled,created_at,updated_at) VALUES(?,?,?,?,?,1,?,?)", (pid, ch, dd, color, account_id, t, t))
                 return self.send_json(get_state())
 
@@ -743,6 +877,8 @@ class Handler(SimpleHTTPRequestHandler):
                         reset_count = max(0, int(d.get("reset_count", existing["reset_count"])))
                         c.execute("UPDATE accounts SET name=?,user_type=?,reset_count=?,updated_at=? WHERE id=?", (name, user_type, reset_count, t, aid))
                     else:
+                        if c.execute("SELECT COUNT(*) n FROM accounts").fetchone()["n"] >= MAX_ACCOUNTS:
+                            raise ValueError(f"Maximum {MAX_ACCOUNTS} account mnemonics")
                         reset_count = max(0, int(d.get("reset_count", 0)))
                         c.execute("INSERT INTO accounts(name,user_type,weekly_remaining,five_hour_reset_at,weekly_reset_at,reset_count,created_at,updated_at) VALUES(?,?,100,NULL,NULL,?,?,?)", (name, user_type, reset_count, t, t))
                 return self.send_json(get_state())
@@ -780,6 +916,24 @@ class Handler(SimpleHTTPRequestHandler):
                     c.execute("UPDATE accounts SET reset_count=?,updated_at=? WHERE id=?", (count, epoch(), aid))
                 return self.send_json(get_state())
 
+            if path == "/api/account/increment-reset-count":
+                aid = int(d["id"])
+                with conn() as c:
+                    if not c.execute("SELECT 1 FROM accounts WHERE id=?", (aid,)).fetchone():
+                        raise ValueError("Unknown account mnemonic")
+                    c.execute("UPDATE accounts SET reset_count=reset_count+1,updated_at=? WHERE id=?", (epoch(), aid))
+                return self.send_json(get_state())
+
+            if path == "/api/handoff":
+                prompt = str(d.get("prompt", ""))
+                reply = str(d.get("reply", ""))
+                if len(prompt) > 12000 or len(reply) > 200000:
+                    raise ValueError("Handoff text is too large")
+                with conn() as c:
+                    state_set(c, "handoff_prompt", prompt)
+                    state_set(c, "handoff_reply", reply)
+                return self.send_json(get_state())
+
             if path == "/api/account/start-five-hour":
                 aid = int(d["id"])
                 reset_at = epoch() + 5 * 60 * 60
@@ -813,6 +967,14 @@ class Handler(SimpleHTTPRequestHandler):
                             (epoch(), aid),
                         )
                 return self.send_json(get_state())
+
+            if path == "/api/labs/reset-desktop-ui":
+                result = reset_launcher_desktop_settings(d.get("id"))
+                return self.send_json({"ok": True, "result": result, "state": get_state()})
+
+            if path == "/api/labs/restore-desktop-ui":
+                result = restore_launcher_desktop_settings(d.get("id"))
+                return self.send_json({"ok": True, "result": result, "state": get_state()})
 
             if path == "/api/global/quota-reset":
                 with conn() as c:
