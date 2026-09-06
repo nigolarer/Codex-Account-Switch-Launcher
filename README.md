@@ -54,7 +54,7 @@ Account aliases are local labels only. They are not verified OpenAI identities, 
 Download:
 
 ```text
-Codex-Switcher-v0.22.4-macOS-arm64.zip
+Codex-Switcher-v1.0.9-macOS-arm64.zip
 ```
 
 Then:
@@ -88,7 +88,7 @@ The build script:
 Output:
 
 ```text
-release/Codex-Switcher-v0.22.4-macOS-arm64.zip
+release/Codex-Switcher-v1.0.9-macOS-arm64.zip
 ```
 
 ### Local development install
@@ -244,13 +244,13 @@ A future Developer ID signed and notarized build can remove this extra step.
 Current public release:
 
 ```text
-v0.22.4
+v1.0.9
 ```
 
 Release asset:
 
 ```text
-Codex-Switcher-v0.22.4-macOS-arm64.zip
+Codex-Switcher-v1.0.9-macOS-arm64.zip
 ```
 
 ### v0.21.2 stale backend fix
@@ -258,6 +258,12 @@ Codex-Switcher-v0.22.4-macOS-arm64.zip
 The native app now verifies both the backend version and the static UI before reusing an existing local service. If an older Codex Switcher backend is still listening after the source folder was renamed or moved, the app safely replaces that stale backend instead of attaching to it and showing a 404 page. Release builds also validate that `runtime/static/index.html` is present.
 
 ## Release notes
+
+### v1.0.3 Bound quota read-only polish
+
+- Bound accounts now treat reset-count data as read-only: the edit pencil and **Increase reset count** action are hidden, account settings disable the field, and backend endpoints reject manual changes. Global reset-card actions skip bound accounts.
+- When a bound account has 100% remaining in the 5-hour window, the countdown is always `—` and the UI explicitly shows **Next reset: Not started** in Current, Suggested next, and launcher cards.
+- Unified the spacing between **Bound** and the membership badge across the top summary cards and lower launcher cards.
 
 ### v0.22.4 official sync age + bound-account interaction polish
 
@@ -274,3 +280,64 @@ The native app now verifies both the backend version and the static UI before re
 - After binding, a compact **Bound** badge appears immediately before the membership badge in Current, Suggested next, and launcher cards. Hover the badge to see the saved account ID, detected plan, source CODEX_HOME, and last sync time.
 - Renames the current-launcher live quota action to **Sync now**. It reads the launcher’s local Codex OAuth credential on demand and updates 5-hour/weekly remaining plus reset timestamps from the live Codex usage endpoint.
 - Keeps the quota-aware recommendation rules from v0.22.0: configurable 15% 5-hour and 10% Plus weekly attention thresholds.
+
+
+### v1.0.3 Bound-account reset controls
+
+- Bound accounts can no longer edit weekly reset timestamps, restart the local 5-hour countdown, or set a custom 5-hour reset time.
+- Bound launcher cards show **Sync now** instead of local reset controls, keeping official quota/reset data authoritative.
+- Added backend guards so bound reset timestamps cannot be modified by bypassing the UI.
+
+### v1.0.0 UI polish and Hand Off presets
+
+- Added a localized **Preset info** action to Next Codex Hand Off. The Chinese and English interfaces insert different fixed continuation instructions, and existing text is protected by a replace confirmation.
+- Promoted the project version to **1.0.0** across the backend, release build, app bundle metadata, and documentation.
+- Matched the **Sync now** button height to **Switch & Launch** while keeping each button width content-driven.
+
+
+### v1.0.7 Sync cadence settings restored
+
+- Restores a dedicated **Sync settings** section in Settings.
+- Active-launcher official quota sync cadence can be set to **5 minutes / 30 minutes / 1 hour / 3 hours** (default: 30 minutes).
+- Restores the separate **Global sync** cycle. It refreshes all distinct bound accounts and defaults to **6 hours**. Its interval is independently configurable from 1 to 168 hours.
+- The “Next sync” time under a bound account now follows the earlier of its active-launcher sync and the next global sync.
+- Both sync settings are persisted in the existing SQLite state and survive app upgrades.
+
+
+### v1.0.7 Inline sync feedback
+
+- **Sync now** no longer opens a confirmation/success dialog.
+- While a manual sync is running, the button becomes **Syncing** with an inline CSS loading spinner.
+- Manual sync is guarded against repeated clicks for 5 seconds.
+- After success, the relative **Just synced** text briefly rises in and turns green, then settles back to the normal secondary color.
+- The same behavior is used by Sync now controls in both the current launcher and lower launcher cards.
+
+
+### v1.0.7 Bound-account global sync mode
+
+- When every local account mnemonic is bound to an official account, the top-level **Global quota reset** and **Global reset card** actions are hidden.
+- They are replaced by **Sync all now**, which manually triggers the same all-bound-account synchronization used by the configured global sync cycle (6 hours by default).
+- Manual global sync uses inline loading feedback, prevents repeated clicks for at least 5 seconds, updates the global-sync timestamp, and refreshes all successfully synchronized account cards.
+- If any local account is unbound again, the two local reset actions return automatically and the global sync button is hidden.
+
+
+### v1.0.7 Quota warning emphasis
+
+- Weekly and 5-hour remaining labels now turn into a soft red at the same threshold that shows the Attention badge.
+- The red emphasis gradually strengthens as remaining quota approaches 0%.
+- Below 5%, the Attention badge changes to **Low quota**.
+
+
+### v1.0.8 Automatic bound-account remapping on sync
+
+- If **Sync now** discovers that a launcher is currently signed in to a different real Codex account than the mnemonic assigned in Codex Switcher, it now looks for that real account among existing local bound accounts.
+- When a matching bound account is found, the launcher is automatically reassigned to that account mnemonic and synchronization continues normally without showing an account-mismatch error.
+- The mismatch error is shown only when the signed-in real account has no matching bound account in the local database.
+- This is especially useful after signing out and signing in to another account directly inside Codex without first updating the launcher mapping in Codex Switcher.
+
+
+### v1.0.9 Quota warning and sync UI refinements
+
+- Quota labels stay in their normal text color; only the Attention badge changes from muted yellow to orange-red as quota falls, then becomes the softer Low quota badge below 5%.
+- Removed the duplicate Sync now action from launcher tool groups; bound launchers keep the Sync now control in the 5-hour section.
+- Next official sync is now shown as a relative countdown using 1-minute granularity under 5 minutes and 5-minute granularity afterwards.

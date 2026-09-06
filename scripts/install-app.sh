@@ -135,8 +135,8 @@ cat > "$CONTENTS/Info.plist" <<'PLIST_EOF'
   <key>CFBundleName</key><string>Codex Switcher</string>
   <key>CFBundleDisplayName</key><string>Codex Switcher</string>
   <key>CFBundleIdentifier</key><string>com.nigolarer.codex-switcher</string>
-  <key>CFBundleVersion</key><string>0.22.4</string>
-  <key>CFBundleShortVersionString</key><string>0.22.4</string>
+  <key>CFBundleVersion</key><string>1.0.9</string>
+  <key>CFBundleShortVersionString</key><string>1.0.9</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleExecutable</key><string>CodexAccountSwitcher</string>
   <key>CFBundleIconFile</key><string>AppIcon.icns</string>

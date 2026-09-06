@@ -35,7 +35,7 @@ HOST = os.environ.get("CODEX_LAUNCHER_HOST", "127.0.0.1")
 DEFAULT_PORT = 17831
 PORT_ENV = os.environ.get("CODEX_LAUNCHER_PORT")
 CHATGPT_APP = os.environ.get("CHATGPT_APP", "/Applications/ChatGPT.app")
-APP_VERSION = "0.22.4"
+APP_VERSION = "1.0.9"
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -134,6 +134,9 @@ MAX_LAUNCHERS = len(LAUNCHER_IDS)
 MAX_ACCOUNTS = 20
 DEFAULT_FIVE_HOUR_DANGER_THRESHOLD = 15
 DEFAULT_PLUS_WEEKLY_DANGER_THRESHOLD = 10
+DEFAULT_OFFICIAL_SYNC_INTERVAL_MINUTES = 30
+DEFAULT_GLOBAL_SYNC_INTERVAL_HOURS = 6
+ALLOWED_OFFICIAL_SYNC_INTERVAL_MINUTES = (5, 30, 60, 180)
 USER_TYPES = ("Plus", "Pro X10", "Pro X20", "Ultra")
 
 
@@ -328,6 +331,12 @@ def ensure_defaults():
             state_set(c, "five_hour_danger_threshold", DEFAULT_FIVE_HOUR_DANGER_THRESHOLD)
         if state_get(c, "plus_weekly_danger_threshold") is None:
             state_set(c, "plus_weekly_danger_threshold", DEFAULT_PLUS_WEEKLY_DANGER_THRESHOLD)
+        if state_get(c, "official_sync_interval_minutes") is None:
+            state_set(c, "official_sync_interval_minutes", DEFAULT_OFFICIAL_SYNC_INTERVAL_MINUTES)
+        if state_get(c, "global_sync_interval_hours") is None:
+            state_set(c, "global_sync_interval_hours", DEFAULT_GLOBAL_SYNC_INTERVAL_HOURS)
+        if state_get(c, "last_global_sync_at") is None:
+            state_set(c, "last_global_sync_at", epoch())
 
         # Cap persisted switch history, including records created by older versions.
         if table_exists(c, "history"):
@@ -362,6 +371,14 @@ def get_state():
             "WHERE five_hour_reset_at IS NOT NULL AND five_hour_reset_at<=?",
             (now, now),
         )
+        # For bound accounts, 100% means there is no active 5-hour usage window yet.
+        # The official API can still expose a moving reset_at while the quota is untouched;
+        # suppress that timestamp until the first request consumes quota (<100%).
+        c.execute(
+            "UPDATE accounts SET five_hour_reset_at=NULL,updated_at=? "
+            "WHERE bound_account_id IS NOT NULL AND five_hour_remaining>=100 AND five_hour_reset_at IS NOT NULL",
+            (now,),
+        )
         accounts = rows_to_dict(c.execute("SELECT * FROM accounts ORDER BY id").fetchall())
         launchers = rows_to_dict(c.execute("SELECT * FROM launchers ORDER BY id").fetchall())
         st = {r["key"]: r["value"] for r in c.execute("SELECT key,value FROM state")}
@@ -371,6 +388,19 @@ def get_state():
     plus_weekly_threshold = clamp_percent(st.get("plus_weekly_danger_threshold"), DEFAULT_PLUS_WEEKLY_DANGER_THRESHOLD)
     st["five_hour_danger_threshold"] = str(five_threshold)
     st["plus_weekly_danger_threshold"] = str(plus_weekly_threshold)
+    try:
+        sync_minutes = int(st.get("official_sync_interval_minutes", DEFAULT_OFFICIAL_SYNC_INTERVAL_MINUTES))
+    except (TypeError, ValueError):
+        sync_minutes = DEFAULT_OFFICIAL_SYNC_INTERVAL_MINUTES
+    if sync_minutes not in ALLOWED_OFFICIAL_SYNC_INTERVAL_MINUTES:
+        sync_minutes = DEFAULT_OFFICIAL_SYNC_INTERVAL_MINUTES
+    try:
+        global_hours = int(st.get("global_sync_interval_hours", DEFAULT_GLOBAL_SYNC_INTERVAL_HOURS))
+    except (TypeError, ValueError):
+        global_hours = DEFAULT_GLOBAL_SYNC_INTERVAL_HOURS
+    global_hours = max(1, min(168, global_hours))
+    st["official_sync_interval_minutes"] = str(sync_minutes)
+    st["global_sync_interval_hours"] = str(global_hours)
 
     account_map = {a["id"]: a for a in accounts}
     active = st.get("active_launcher", "A")
@@ -686,7 +716,23 @@ def sync_real_account(launcher_id):
             raise ValueError("This account mnemonic has not been bound to a real Codex account")
         oauth = read_launcher_oauth(launcher_row)
         if oauth["account_id"] != account_row["bound_account_id"]:
-            raise ValueError("The launcher is signed in to a different Codex account than the saved binding")
+            # The user may have signed out/in to another already-bound Codex account
+            # inside this launcher without updating Codex Switcher first. Try to repair
+            # the local launcher→mnemonic mapping automatically before treating it as
+            # an error. This keeps the real-account binding authoritative while making
+            # manual in-app account switches self-healing on the next Sync now.
+            matched_account = c.execute(
+                "SELECT * FROM accounts WHERE bound_account_id=? ORDER BY id LIMIT 1",
+                (oauth["account_id"],),
+            ).fetchone()
+            if not matched_account:
+                raise ValueError("The launcher is signed in to a different Codex account and no matching local bound account was found")
+            account_id = int(matched_account["id"])
+            account_row = matched_account
+            c.execute(
+                "UPDATE launchers SET account_id=?,updated_at=? WHERE id=?",
+                (account_id, epoch(), launcher_id),
+            )
 
     usage = parse_wham_usage(fetch_wham_usage(oauth["access_token"], oauth["account_id"]))
     five = usage.get("five") or {}
@@ -695,11 +741,21 @@ def sync_real_account(launcher_id):
     fields = ["last_sync_at=?", "bound_plan_type=?", "updated_at=?"]
     values = [now, usage.get("plan_type"), now]
     if five.get("remaining") is not None:
+        five_remaining = max(0, min(100, int(five["remaining"])))
         fields.append("five_hour_remaining=?")
-        values.append(int(five["remaining"]))
-    if five.get("reset_at") is not None:
+        values.append(five_remaining)
+        # 100% means no active 5-hour window has started. The API may report a
+        # provisional/moving reset time in this state, so always clear it.
         fields.append("five_hour_reset_at=?")
-        values.append(int(five["reset_at"]))
+        if five_remaining >= 100:
+            values.append(None)
+        else:
+            values.append(int(five["reset_at"]) if five.get("reset_at") is not None else None)
+    elif five.get("reset_at") is not None:
+        # Only accept a reset timestamp when we also know the quota is below 100%.
+        # Without a remaining value, preserve the existing window state instead of
+        # starting a countdown from an ambiguous API timestamp.
+        pass
     if weekly.get("remaining") is not None:
         fields.append("weekly_remaining=?")
         values.append(int(weekly["remaining"]))
@@ -711,6 +767,31 @@ def sync_real_account(launcher_id):
         c.execute(f"UPDATE accounts SET {','.join(fields)} WHERE id=?", values)
     return get_state()
 
+def sync_all_bound_accounts():
+    """Refresh each distinct bound account once, using one configured launcher for its auth home."""
+    with conn() as c:
+        rows = c.execute(
+            "SELECT l.id launcher_id,a.id account_id FROM launchers l "
+            "JOIN accounts a ON a.id=l.account_id "
+            "WHERE l.enabled=1 AND a.bound_account_id IS NOT NULL ORDER BY l.id"
+        ).fetchall()
+    seen = set()
+    results = []
+    for row in rows:
+        aid = int(row["account_id"])
+        if aid in seen:
+            continue
+        seen.add(aid)
+        lid = row["launcher_id"]
+        try:
+            sync_real_account(lid)
+            results.append({"launcher_id": lid, "account_id": aid, "ok": True})
+        except Exception as e:
+            results.append({"launcher_id": lid, "account_id": aid, "ok": False, "error": str(e)})
+    with conn() as c:
+        state_set(c, "last_global_sync_at", epoch())
+    return {"results": results, "state": get_state()}
+
 def set_custom_five_hour_reset(aid, target_ts):
     aid = int(aid)
     target_ts = int(target_ts)
@@ -721,8 +802,11 @@ def set_custom_five_hour_reset(aid, target_ts):
     if target_ts - now > 5 * 60 * 60:
         raise ValueError("Custom reset time cannot be more than 5 hours from now")
     with conn() as c:
-        if not c.execute("SELECT 1 FROM accounts WHERE id=?", (aid,)).fetchone():
+        row = c.execute("SELECT bound_account_id FROM accounts WHERE id=?", (aid,)).fetchone()
+        if not row:
             raise ValueError("Unknown account mnemonic")
+        if row["bound_account_id"]:
+            raise ValueError("Bound account reset times are read-only; use Sync now")
         c.execute("UPDATE accounts SET five_hour_reset_at=?,updated_at=? WHERE id=?", (target_ts, now, aid))
 
 
@@ -1087,6 +1171,8 @@ class Handler(SimpleHTTPRequestHandler):
                 welcome_seen = d.get("welcome_seen")
                 five_hour_danger_threshold = d.get("five_hour_danger_threshold")
                 plus_weekly_danger_threshold = d.get("plus_weekly_danger_threshold")
+                official_sync_interval_minutes = d.get("official_sync_interval_minutes")
+                global_sync_interval_hours = d.get("global_sync_interval_hours")
                 with conn() as c:
                     if lang is not None:
                         if lang not in ("zh-CN", "en"):
@@ -1113,6 +1199,16 @@ class Handler(SimpleHTTPRequestHandler):
                         if value < 0 or value > 100:
                             raise ValueError("Plus weekly danger threshold must be between 0 and 100")
                         state_set(c, "plus_weekly_danger_threshold", value)
+                    if official_sync_interval_minutes is not None:
+                        value = int(official_sync_interval_minutes)
+                        if value not in ALLOWED_OFFICIAL_SYNC_INTERVAL_MINUTES:
+                            raise ValueError("Official sync interval must be 5, 30, 60, or 180 minutes")
+                        state_set(c, "official_sync_interval_minutes", value)
+                    if global_sync_interval_hours is not None:
+                        value = int(global_sync_interval_hours)
+                        if value < 1 or value > 168:
+                            raise ValueError("Global sync interval must be between 1 and 168 hours")
+                        state_set(c, "global_sync_interval_hours", value)
                 return self.send_json(get_state())
 
             if path == "/api/launcher":
@@ -1168,7 +1264,9 @@ class Handler(SimpleHTTPRequestHandler):
                         existing = c.execute("SELECT * FROM accounts WHERE id=?", (aid,)).fetchone()
                         if not existing:
                             raise ValueError("Unknown account mnemonic")
-                        reset_count = max(0, int(d.get("reset_count", existing["reset_count"])))
+                        if existing["bound_account_id"] and "reset_count" in d and int(d.get("reset_count", existing["reset_count"])) != int(existing["reset_count"] or 0):
+                            raise ValueError("Bound account reset count is read-only; use Sync now")
+                        reset_count = int(existing["reset_count"] or 0) if existing["bound_account_id"] else max(0, int(d.get("reset_count", existing["reset_count"])))
                         c.execute("UPDATE accounts SET name=?,user_type=?,reset_count=?,updated_at=? WHERE id=?", (name, user_type, reset_count, t, aid))
                     else:
                         if c.execute("SELECT COUNT(*) n FROM accounts").fetchone()["n"] >= MAX_ACCOUNTS:
@@ -1191,6 +1289,10 @@ class Handler(SimpleHTTPRequestHandler):
 
             if path == "/api/account/sync-real":
                 return self.send_json(sync_real_account(d.get("launcher_id")))
+
+            if path == "/api/account/sync-global":
+                result = sync_all_bound_accounts()
+                return self.send_json({"ok": True, **result})
 
             if path == "/api/account/weekly":
                 aid, weekly = int(d["id"]), max(0, min(100, int(d["weekly_remaining"])))
@@ -1219,22 +1321,33 @@ class Handler(SimpleHTTPRequestHandler):
                 target = d.get("weekly_reset_at")
                 target = int(target) if target not in (None, "") else None
                 with conn() as c:
-                    if not c.execute("SELECT 1 FROM accounts WHERE id=?", (aid,)).fetchone():
+                    row = c.execute("SELECT bound_account_id FROM accounts WHERE id=?", (aid,)).fetchone()
+                    if not row:
                         raise ValueError("Unknown account mnemonic")
+                    if row["bound_account_id"]:
+                        raise ValueError("Bound account reset times are read-only; use Sync now")
                     c.execute("UPDATE accounts SET weekly_reset_at=?,updated_at=? WHERE id=?", (target, epoch(), aid))
                 return self.send_json(get_state())
 
             if path == "/api/account/reset-count":
                 aid, count = int(d["id"]), max(0, int(d["reset_count"]))
                 with conn() as c:
+                    row = c.execute("SELECT bound_account_id FROM accounts WHERE id=?", (aid,)).fetchone()
+                    if not row:
+                        raise ValueError("Unknown account mnemonic")
+                    if row["bound_account_id"]:
+                        raise ValueError("Bound account reset count is read-only; use Sync now")
                     c.execute("UPDATE accounts SET reset_count=?,updated_at=? WHERE id=?", (count, epoch(), aid))
                 return self.send_json(get_state())
 
             if path == "/api/account/increment-reset-count":
                 aid = int(d["id"])
                 with conn() as c:
-                    if not c.execute("SELECT 1 FROM accounts WHERE id=?", (aid,)).fetchone():
+                    row = c.execute("SELECT bound_account_id FROM accounts WHERE id=?", (aid,)).fetchone()
+                    if not row:
                         raise ValueError("Unknown account mnemonic")
+                    if row["bound_account_id"]:
+                        raise ValueError("Bound account reset count is read-only; use Sync now")
                     c.execute("UPDATE accounts SET reset_count=reset_count+1,updated_at=? WHERE id=?", (epoch(), aid))
                 return self.send_json(get_state())
 
@@ -1252,8 +1365,11 @@ class Handler(SimpleHTTPRequestHandler):
                 aid = int(d["id"])
                 reset_at = epoch() + 5 * 60 * 60
                 with conn() as c:
-                    if not c.execute("SELECT 1 FROM accounts WHERE id=?", (aid,)).fetchone():
+                    row = c.execute("SELECT bound_account_id FROM accounts WHERE id=?", (aid,)).fetchone()
+                    if not row:
                         raise ValueError("Unknown account mnemonic")
+                    if row["bound_account_id"]:
+                        raise ValueError("Bound account reset times are read-only; use Sync now")
                     c.execute("UPDATE accounts SET five_hour_reset_at=?,updated_at=? WHERE id=?", (reset_at, epoch(), aid))
                 return self.send_json(get_state())
 
@@ -1265,9 +1381,11 @@ class Handler(SimpleHTTPRequestHandler):
                 aid = int(d["id"])
                 consume = bool(d.get("consume_reset_count", False))
                 with conn() as c:
-                    row = c.execute("SELECT reset_count FROM accounts WHERE id=?", (aid,)).fetchone()
+                    row = c.execute("SELECT reset_count,bound_account_id FROM accounts WHERE id=?", (aid,)).fetchone()
                     if not row:
                         raise ValueError("Unknown account mnemonic")
+                    if row["bound_account_id"]:
+                        raise ValueError("Bound account quota and reset count are read-only; use Sync now")
                     if consume:
                         if int(row["reset_count"] or 0) <= 0:
                             raise ValueError("No reset count is available to consume")
@@ -1293,13 +1411,13 @@ class Handler(SimpleHTTPRequestHandler):
             if path == "/api/global/quota-reset":
                 with conn() as c:
                     now = epoch()
-                    c.execute("UPDATE accounts SET weekly_remaining=100,five_hour_remaining=100,five_hour_reset_at=NULL,updated_at=?", (now,))
+                    c.execute("UPDATE accounts SET weekly_remaining=100,five_hour_remaining=100,five_hour_reset_at=NULL,updated_at=? WHERE bound_account_id IS NULL", (now,))
                 return self.send_json(get_state())
 
             if path == "/api/global/reset-card":
                 with conn() as c:
                     now = epoch()
-                    c.execute("UPDATE accounts SET reset_count=reset_count+1,updated_at=?", (now,))
+                    c.execute("UPDATE accounts SET reset_count=reset_count+1,updated_at=? WHERE bound_account_id IS NULL", (now,))
                 return self.send_json(get_state())
 
             return self.send_json({"error": "Not found"}, 404)
