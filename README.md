@@ -35,6 +35,15 @@ It is designed for people who use more than one Codex account on the same Mac an
 - Snap points on weekly quota sliders.
 - Persistent **Next Codex Hand Off** scratchpad for carrying context between accounts.
 - Editable 5-hour reset time directly from the current launcher panel.
+- Automatically primes bound accounts' 5-hour windows without switching or interrupting the foreground ChatGPT app.
+
+## Inspection mode
+
+Enable **Inspection mode** in Settings; the preference saves automatically. The current launcher stays on the left, while compact rows on the right show the other launchers, suggested first. Each row retains its launcher color, account name, weekly remaining quota, weekly reset time, 5-hour remaining quota, 5-hour reset time, reset count, and a Launch button.
+
+Wide windows fit up to five rows beside the current card, moving overflow into the Launchers section below. That section hides when empty. Narrow windows stack the panels and wrap metrics. Sync all can refresh bound accounts even when some accounts are still unbound.
+
+For daily use, switch account logins inside A. A row's Launch button opens the corresponding launcher for binding or maintenance; inspection mode does not transfer login credentials into A. Turn the mode off to restore full cards and recent switch history.
 
 ## How it works
 
@@ -47,6 +56,17 @@ A launcher controls how ChatGPT / Codex Desktop starts:
 
 Account aliases are local labels only. They are not verified OpenAI identities, so you can manually change which account label is associated with a launcher if you sign into a different account inside that profile.
 
+## Automatic 5-Hour Window Priming
+
+Auto-prime is enabled by default for bound accounts. Codex Switcher performs one unified full sync of all bound accounts every hour, and a verified `prime_next_at` also serves as the durable next 5H reset job. One background loop runs every five minutes and batches every due reset, delayed verification, and verification retry. When a new window is needed and the account is inside its configured active hours, it runs a temporary read-only Codex CLI session with that launcher's `CODEX_HOME` and sends a random two-digit addition problem whose operands and result are at most 100 using the low-usage model. The first reset timestamp is only a candidate: quota is synced again after at least five minutes, and success requires the absolute timestamp to drift by no more than five seconds while its remaining countdown has fallen below 4 hours 59 minutes. Network or validation failures retry only the quota read in a later five-minute task, never the prompt.
+
+- Active hours default to 24 hours and can be configured per account, including overnight ranges.
+- Auto-prime can be disabled independently for each account.
+- Priming pauses when weekly remaining usage is below 5%.
+- macOS sleep naturally pauses checks; a wake notification triggers an immediate catch-up check.
+- Codex runs with `--ephemeral`, so no Session is persisted or shown in normal task history and no archive step is needed. It does not quit, switch, or focus ChatGPT Desktop.
+- Codex Switcher must remain running; fully quitting the app also stops background checks.
+
 ## Installation
 
 ### GitHub Release
@@ -54,7 +74,7 @@ Account aliases are local labels only. They are not verified OpenAI identities, 
 Download:
 
 ```text
-Codex-Switcher-v1.0.9-macOS-arm64.zip
+Codex-Switcher-v1.1.0-macOS-arm64.zip
 ```
 
 Then:
@@ -88,7 +108,7 @@ The build script:
 Output:
 
 ```text
-release/Codex-Switcher-v1.0.9-macOS-arm64.zip
+release/Codex-Switcher-v1.1.0-macOS-arm64.zip
 ```
 
 ### Local development install
@@ -100,8 +120,14 @@ release/Codex-Switcher-v1.0.9-macOS-arm64.zip
 Installed app:
 
 ```text
-~/Applications/Codex Switcher.app
+/Applications/Codex Switcher.app
 ```
+
+The installer closes running Codex Switcher instances before building, creates
+the release ZIP for distribution, moves the freshly built app directly from
+`build/release/` into `/Applications`, removes duplicate personal-Applications
+copies, and starts the installed app. It never extracts the ZIP for local use,
+and no app bundle remains under `build/` after a successful installation.
 
 Development mode:
 
@@ -244,13 +270,13 @@ A future Developer ID signed and notarized build can remove this extra step.
 Current public release:
 
 ```text
-v1.0.9
+v1.1.0
 ```
 
 Release asset:
 
 ```text
-Codex-Switcher-v1.0.9-macOS-arm64.zip
+Codex-Switcher-v1.1.0-macOS-arm64.zip
 ```
 
 ### v0.21.2 stale backend fix
@@ -336,7 +362,7 @@ The native app now verifies both the backend version and the static UI before re
 - This is especially useful after signing out and signing in to another account directly inside Codex without first updating the launcher mapping in Codex Switcher.
 
 
-### v1.0.9 Quota warning and sync UI refinements
+### v1.1.0 Quota warning and sync UI refinements
 
 - Quota labels stay in their normal text color; only the Attention badge changes from muted yellow to orange-red as quota falls, then becomes the softer Low quota badge below 5%.
 - Removed the duplicate Sync now action from launcher tool groups; bound launchers keep the Sync now control in the 5-hour section.

@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 import json
 import os
+import random
 import re
 import shutil
 import signal
 import sqlite3
 import subprocess
 import sys
+import tempfile
+import threading
 import time
 import webbrowser
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
@@ -35,7 +38,7 @@ HOST = os.environ.get("CODEX_LAUNCHER_HOST", "127.0.0.1")
 DEFAULT_PORT = 17831
 PORT_ENV = os.environ.get("CODEX_LAUNCHER_PORT")
 CHATGPT_APP = os.environ.get("CHATGPT_APP", "/Applications/ChatGPT.app")
-APP_VERSION = "1.0.9"
+APP_VERSION = "1.1.0"
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -94,6 +97,18 @@ CREATE TABLE IF NOT EXISTS accounts (
   bound_auth_home TEXT,
   bound_at INTEGER,
   last_sync_at INTEGER,
+  auto_prime_enabled INTEGER NOT NULL DEFAULT 1,
+  prime_active_start_minute INTEGER NOT NULL DEFAULT 0,
+  prime_active_end_minute INTEGER NOT NULL DEFAULT 0,
+  prime_next_at INTEGER,
+  prime_last_attempt_at INTEGER,
+  prime_last_success_at INTEGER,
+  prime_candidate_reset_at INTEGER,
+  prime_candidate_observed_at INTEGER,
+  prime_verify_after_at INTEGER,
+  prime_verify_attempts INTEGER NOT NULL DEFAULT 0,
+  prime_status TEXT NOT NULL DEFAULT 'idle',
+  prime_error TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
@@ -135,9 +150,20 @@ MAX_ACCOUNTS = 20
 DEFAULT_FIVE_HOUR_DANGER_THRESHOLD = 15
 DEFAULT_PLUS_WEEKLY_DANGER_THRESHOLD = 10
 DEFAULT_OFFICIAL_SYNC_INTERVAL_MINUTES = 30
-DEFAULT_GLOBAL_SYNC_INTERVAL_HOURS = 6
+DEFAULT_GLOBAL_SYNC_INTERVAL_HOURS = 1
+GLOBAL_SYNC_INTERVAL_SECONDS = 60 * 60
+AUTO_PRIME_TASK_SWEEP_INTERVAL_SECONDS = 5 * 60
+AUTO_PRIME_WEEKLY_MINIMUM_PERCENT = 5
+AUTO_PRIME_MODEL = "gpt-5.6-luna"
+AUTO_PRIME_VERIFY_DELAY_SECONDS = 5 * 60
+AUTO_PRIME_VERIFY_RETRY_SECONDS = 5 * 60
+AUTO_PRIME_VERIFY_MAX_ATTEMPTS = 3
+AUTO_PRIME_RESET_TOLERANCE_SECONDS = 5
+AUTO_PRIME_VERIFY_MAX_REMAINING_SECONDS = 4 * 3600 + 59 * 60
 ALLOWED_OFFICIAL_SYNC_INTERVAL_MINUTES = (5, 30, 60, 180)
 USER_TYPES = ("Plus", "Pro X10", "Pro X20", "Ultra")
+_prime_lock = threading.Lock()
+_scheduler_lock = threading.Lock()
 
 
 def epoch():
@@ -275,6 +301,18 @@ def migrate_schema_v8(c):
         ("bound_auth_home", "TEXT"),
         ("bound_at", "INTEGER"),
         ("last_sync_at", "INTEGER"),
+        ("auto_prime_enabled", "INTEGER NOT NULL DEFAULT 1"),
+        ("prime_active_start_minute", "INTEGER NOT NULL DEFAULT 0"),
+        ("prime_active_end_minute", "INTEGER NOT NULL DEFAULT 0"),
+        ("prime_next_at", "INTEGER"),
+        ("prime_last_attempt_at", "INTEGER"),
+        ("prime_last_success_at", "INTEGER"),
+        ("prime_candidate_reset_at", "INTEGER"),
+        ("prime_candidate_observed_at", "INTEGER"),
+        ("prime_verify_after_at", "INTEGER"),
+        ("prime_verify_attempts", "INTEGER NOT NULL DEFAULT 0"),
+        ("prime_status", "TEXT NOT NULL DEFAULT 'idle'"),
+        ("prime_error", "TEXT"),
     ):
         if name not in cols:
             c.execute(f"ALTER TABLE accounts ADD COLUMN {name} {decl}")
@@ -333,8 +371,9 @@ def ensure_defaults():
             state_set(c, "plus_weekly_danger_threshold", DEFAULT_PLUS_WEEKLY_DANGER_THRESHOLD)
         if state_get(c, "official_sync_interval_minutes") is None:
             state_set(c, "official_sync_interval_minutes", DEFAULT_OFFICIAL_SYNC_INTERVAL_MINUTES)
-        if state_get(c, "global_sync_interval_hours") is None:
-            state_set(c, "global_sync_interval_hours", DEFAULT_GLOBAL_SYNC_INTERVAL_HOURS)
+        # Full-account discovery and the old global sync are now one fixed
+        # hourly backend job. Normalize older configurable 6-hour values.
+        state_set(c, "global_sync_interval_hours", DEFAULT_GLOBAL_SYNC_INTERVAL_HOURS)
         if state_get(c, "last_global_sync_at") is None:
             state_set(c, "last_global_sync_at", epoch())
 
@@ -371,13 +410,30 @@ def get_state():
             "WHERE five_hour_reset_at IS NOT NULL AND five_hour_reset_at<=?",
             (now, now),
         )
-        # For bound accounts, 100% means there is no active 5-hour usage window yet.
-        # The official API can still expose a moving reset_at while the quota is untouched;
-        # suppress that timestamp until the first request consumes quota (<100%).
+        # A successful minimal prime can still be rounded to 100% remaining by
+        # the official quota API.  In that case prime_next_at is the verified,
+        # fixed reset timestamp and must also back the legacy reset field used
+        # by inspection mode and older UI clients.
+        c.execute(
+            "UPDATE accounts SET five_hour_reset_at=prime_next_at,updated_at=? "
+            "WHERE prime_next_at IS NOT NULL AND prime_next_at>? "
+            "AND (five_hour_reset_at IS NULL OR five_hour_reset_at!=prime_next_at)",
+            (now, now),
+        )
+        c.execute(
+            "UPDATE accounts SET prime_status='active',prime_error=NULL,updated_at=? "
+            "WHERE prime_next_at IS NOT NULL AND prime_next_at>? "
+            "AND prime_status='checking' AND prime_candidate_reset_at IS NULL",
+            (now, now),
+        )
+        # Outside a verified prime window, 100% means there is no active 5-hour
+        # usage window yet. The official API can expose a moving/provisional
+        # reset_at in this state, so suppress only that unverified timestamp.
         c.execute(
             "UPDATE accounts SET five_hour_reset_at=NULL,updated_at=? "
-            "WHERE bound_account_id IS NOT NULL AND five_hour_remaining>=100 AND five_hour_reset_at IS NOT NULL",
-            (now,),
+            "WHERE bound_account_id IS NOT NULL AND five_hour_remaining>=100 AND five_hour_reset_at IS NOT NULL "
+            "AND (prime_next_at IS NULL OR prime_next_at<=?)",
+            (now, now),
         )
         accounts = rows_to_dict(c.execute("SELECT * FROM accounts ORDER BY id").fetchall())
         launchers = rows_to_dict(c.execute("SELECT * FROM launchers ORDER BY id").fetchall())
@@ -600,8 +656,30 @@ def _reset_at_from_window(window):
     return None
 
 
+def _reset_count_from_payload(payload):
+    """Return the server-reported number of rate-limit reset credits, if present."""
+    if not isinstance(payload, dict):
+        return None
+    reset_credits = payload.get("rate_limit_reset_credits")
+    if not isinstance(reset_credits, dict):
+        reset_credits = payload.get("rateLimitResetCredits")
+    if not isinstance(reset_credits, dict):
+        return None
+    for key in ("available_count", "availableCount"):
+        value = reset_credits.get(key)
+        if value is None or isinstance(value, bool):
+            continue
+        try:
+            count = int(value)
+        except (TypeError, ValueError):
+            continue
+        if count >= 0:
+            return count
+    return None
+
+
 def parse_wham_usage(payload):
-    """Normalize current and legacy WHAM rate-limit shapes into 5h/week remaining + reset timestamps."""
+    """Normalize WHAM rate limits, reset timestamps, and reset-credit count."""
     if not isinstance(payload, dict):
         raise ValueError("Unexpected quota response")
     rate = payload.get("rate_limit") or payload.get("rate_limits") or {}
@@ -648,6 +726,7 @@ def parse_wham_usage(payload):
         "plan_type": str(payload.get("plan_type") or "").strip() or None,
         "five": five or {},
         "weekly": weekly or {},
+        "reset_count": _reset_count_from_payload(payload),
     }
 
 
@@ -744,13 +823,27 @@ def sync_real_account(launcher_id):
         five_remaining = max(0, min(100, int(five["remaining"])))
         fields.append("five_hour_remaining=?")
         values.append(five_remaining)
-        # 100% means no active 5-hour window has started. The API may report a
-        # provisional/moving reset time in this state, so always clear it.
+        # A tiny prime request may round to 100%. Preserve its independently
+        # verified fixed timestamp; otherwise discard the API's provisional /
+        # moving reset time until actual usage is visible.
         fields.append("five_hour_reset_at=?")
         if five_remaining >= 100:
-            values.append(None)
+            verified_prime_reset = account_row["prime_next_at"]
+            verified_prime_reset = (
+                int(verified_prime_reset)
+                if verified_prime_reset is not None and int(verified_prime_reset) > now
+                else None
+            )
+            values.append(verified_prime_reset)
+            if verified_prime_reset is not None:
+                fields.extend(["prime_status='active'", "prime_error=NULL"])
         else:
-            values.append(int(five["reset_at"]) if five.get("reset_at") is not None else None)
+            active_reset = int(five["reset_at"]) if five.get("reset_at") is not None else None
+            values.append(active_reset)
+            if five.get("reset_at") is not None:
+                fields.append("prime_next_at=?")
+                values.append(active_reset)
+                fields.extend(["prime_status='active'", "prime_error=NULL"])
     elif five.get("reset_at") is not None:
         # Only accept a reset timestamp when we also know the quota is below 100%.
         # Without a remaining value, preserve the existing window state instead of
@@ -762,6 +855,9 @@ def sync_real_account(launcher_id):
     if weekly.get("reset_at") is not None:
         fields.append("weekly_reset_at=?")
         values.append(int(weekly["reset_at"]))
+    if usage.get("reset_count") is not None:
+        fields.append("reset_count=?")
+        values.append(int(usage["reset_count"]))
     values.append(account_id)
     with conn() as c:
         c.execute(f"UPDATE accounts SET {','.join(fields)} WHERE id=?", values)
@@ -791,6 +887,374 @@ def sync_all_bound_accounts():
     with conn() as c:
         state_set(c, "last_global_sync_at", epoch())
     return {"results": results, "state": get_state()}
+
+
+def _minutes_from_midnight(value, field_name):
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{field_name} must be an integer minute from 0 to 1439")
+    if value < 0 or value > 1439:
+        raise ValueError(f"{field_name} must be between 0 and 1439")
+    return value
+
+
+def _inside_prime_hours(account, now=None):
+    now = time.localtime(now or epoch())
+    current = now.tm_hour * 60 + now.tm_min
+    start = int(account["prime_active_start_minute"] or 0)
+    end = int(account["prime_active_end_minute"] or 0)
+    if start == end:
+        return True  # Equal endpoints intentionally mean 24 hours.
+    if start < end:
+        return start <= current < end
+    return current >= start or current < end
+
+
+def _codex_binary():
+    candidates = [
+        Path(CHATGPT_APP) / "Contents/Resources/codex",
+        Path("/Applications/Codex.app/Contents/Resources/codex"),
+    ]
+    for candidate in candidates:
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return candidate
+    found = shutil.which("codex")
+    if found:
+        return Path(found)
+    raise RuntimeError("Codex CLI was not found. Update or reinstall ChatGPT Desktop.")
+
+
+def _random_prime_prompt():
+    """Return a tiny, non-repeating two-digit addition whose sum is at most 100."""
+    left = random.randint(10, 89)
+    right = random.randint(10, 100 - left)
+    return f"请计算 {left} + {right}。只回复数字答案，不要调用工具，不要解释。"
+
+
+def _prime_verification_passes(candidate_reset_at, current_reset_at, verified_at):
+    """Reject rolling placeholders: a real reset stays fixed while its countdown decreases."""
+    if candidate_reset_at is None or current_reset_at is None:
+        return False
+    candidate_reset_at = int(candidate_reset_at)
+    current_reset_at = int(current_reset_at)
+    verified_at = int(verified_at)
+    remaining = current_reset_at - verified_at
+    return (
+        abs(current_reset_at - candidate_reset_at) <= AUTO_PRIME_RESET_TOLERANCE_SECONDS
+        and 0 < remaining < AUTO_PRIME_VERIFY_MAX_REMAINING_SECONDS
+    )
+
+
+def _record_prime_verification_failure(account_id, message, now=None):
+    """Retry quota reads without sending another prompt; fail closed after three reads."""
+    now = int(now or epoch())
+    with conn() as c:
+        row = c.execute(
+            "SELECT prime_verify_attempts,prime_last_attempt_at FROM accounts WHERE id=?",
+            (int(account_id),),
+        ).fetchone()
+        attempts = int(row["prime_verify_attempts"] or 0) + 1 if row else 1
+        retry = attempts < AUTO_PRIME_VERIFY_MAX_ATTEMPTS
+        c.execute(
+            "UPDATE accounts SET prime_verify_attempts=?,prime_verify_after_at=?,prime_status=?,"
+            "prime_error=?,updated_at=? WHERE id=?",
+            (
+                attempts,
+                now + AUTO_PRIME_VERIFY_RETRY_SECONDS if retry else None,
+                "verifying" if retry else "verification_failed",
+                str(message)[:1000],
+                now,
+                int(account_id),
+            ),
+        )
+    return retry
+
+
+def _verify_pending_prime(account_id, launcher_id, now=None):
+    """Perform one delayed, non-consuming quota check for a pending prime request."""
+    now = int(now or epoch())
+    with conn() as c:
+        account = c.execute("SELECT * FROM accounts WHERE id=?", (int(account_id),)).fetchone()
+        launcher = c.execute("SELECT * FROM launchers WHERE id=?", (str(launcher_id).upper(),)).fetchone()
+        if not account or not launcher or account["prime_status"] != "verifying":
+            return {"ok": False, "skipped": "not_pending", "account_id": int(account_id)}
+        verify_after = account["prime_verify_after_at"]
+        if verify_after is None or int(verify_after) > now:
+            return {"ok": False, "skipped": "not_due", "account_id": int(account_id)}
+        candidate = account["prime_candidate_reset_at"]
+        oauth = read_launcher_oauth(launcher)
+
+    try:
+        usage = parse_wham_usage(fetch_wham_usage(oauth["access_token"], oauth["account_id"]))
+        five = usage.get("five") or {}
+        current_reset = int(five["reset_at"]) if five.get("reset_at") is not None else None
+    except Exception as e:
+        retry = _record_prime_verification_failure(account_id, f"Delayed quota sync failed: {e}", now)
+        return {"ok": False, "retry": retry, "account_id": int(account_id), "error": str(e)}
+
+    if not _prime_verification_passes(candidate, current_reset, now):
+        drift = None if candidate is None or current_reset is None else int(current_reset) - int(candidate)
+        remaining = None if current_reset is None else int(current_reset) - now
+        message = (
+            "Reset time did not pass delayed verification "
+            f"(drift={drift}, remaining_seconds={remaining})"
+        )
+        retry = _record_prime_verification_failure(account_id, message, now)
+        return {"ok": False, "retry": retry, "account_id": int(account_id), "error": message}
+
+    fields = [
+        "five_hour_reset_at=?", "prime_next_at=?", "prime_last_success_at=?",
+        "prime_candidate_reset_at=NULL", "prime_candidate_observed_at=NULL",
+        "prime_verify_after_at=NULL", "prime_verify_attempts=0", "prime_status='active'",
+        "prime_error=NULL", "last_sync_at=?", "bound_plan_type=?", "updated_at=?",
+    ]
+    values = [current_reset, current_reset, now, now, usage.get("plan_type"), now]
+    if five.get("remaining") is not None:
+        fields.append("five_hour_remaining=?")
+        values.append(max(0, min(100, int(five["remaining"]))))
+    weekly = usage.get("weekly") or {}
+    if weekly.get("remaining") is not None:
+        fields.append("weekly_remaining=?")
+        values.append(max(0, min(100, int(weekly["remaining"]))))
+    if weekly.get("reset_at") is not None:
+        fields.append("weekly_reset_at=?")
+        values.append(int(weekly["reset_at"]))
+    if usage.get("reset_count") is not None:
+        fields.append("reset_count=?")
+        values.append(int(usage["reset_count"]))
+    values.append(int(account_id))
+    with conn() as c:
+        c.execute(f"UPDATE accounts SET {','.join(fields)} WHERE id=?", values)
+    return {
+        "ok": True,
+        "verified": True,
+        "account_id": int(account_id),
+        "launcher_id": str(launcher_id).upper(),
+        "reset_at": current_reset,
+    }
+
+
+def _prime_launcher_account(launcher_id, force=False, manual=False):
+    launcher_id = str(launcher_id or "").strip().upper()
+    now = epoch()
+    with conn() as c:
+        launcher = c.execute("SELECT * FROM launchers WHERE id=? AND enabled=1", (launcher_id,)).fetchone()
+        if not launcher or not launcher["account_id"]:
+            raise ValueError("Unknown launcher or launcher has no account")
+        account = c.execute("SELECT * FROM accounts WHERE id=?", (launcher["account_id"],)).fetchone()
+        if not account or not account["bound_account_id"]:
+            raise ValueError("Auto-prime requires a bound Codex account")
+        account_id = int(account["id"])
+        if not force and not manual and not int(account["auto_prime_enabled"] or 0):
+            return {"ok": False, "skipped": "disabled", "account_id": account_id, "launcher_id": launcher_id}
+        if not force and not manual and not _inside_prime_hours(account, now):
+            c.execute("UPDATE accounts SET prime_status='outside_hours',prime_error=NULL,updated_at=? WHERE id=?", (now, account_id))
+            return {"ok": False, "skipped": "outside_hours", "account_id": account_id, "launcher_id": launcher_id}
+        if not force and account["prime_next_at"] and int(account["prime_next_at"]) > now:
+            return {"ok": False, "skipped": "not_due", "account_id": account_id, "launcher_id": launcher_id}
+        if account["prime_status"] == "verifying":
+            return {"ok": False, "skipped": "verifying", "account_id": account_id, "launcher_id": launcher_id}
+        if (
+            account["prime_status"] == "verification_failed"
+            and account["prime_last_attempt_at"]
+            and int(account["prime_last_attempt_at"]) + 5 * 3600 > now
+        ):
+            return {"ok": False, "skipped": "verification_cooldown", "account_id": account_id, "launcher_id": launcher_id}
+        c.execute(
+            "UPDATE accounts SET prime_status='checking',prime_error=NULL,prime_last_attempt_at=?,updated_at=? WHERE id=?",
+            (now, now, account_id),
+        )
+
+    # Always refresh immediately before spending any allowance.
+    sync_real_account(launcher_id)
+    with conn() as c:
+        account = c.execute("SELECT * FROM accounts WHERE id=?", (account_id,)).fetchone()
+        launcher = c.execute("SELECT * FROM launchers WHERE id=?", (launcher_id,)).fetchone()
+        if int(account["weekly_remaining"] or 0) < AUTO_PRIME_WEEKLY_MINIMUM_PERCENT:
+            c.execute("UPDATE accounts SET prime_status='weekly_low',prime_error=NULL,updated_at=? WHERE id=?", (epoch(), account_id))
+            return {"ok": False, "skipped": "weekly_low", "account_id": account_id, "launcher_id": launcher_id}
+        if not force and account["prime_next_at"] and int(account["prime_next_at"]) > epoch():
+            return {"ok": False, "skipped": "not_due", "account_id": account_id, "launcher_id": launcher_id}
+        if account["prime_status"] == "verifying":
+            return {"ok": False, "skipped": "verifying", "account_id": account_id, "launcher_id": launcher_id}
+        oauth = read_launcher_oauth(launcher)
+
+    env = os.environ.copy()
+    env["CODEX_HOME"] = str(oauth["home"])
+    prompt = _random_prime_prompt()
+    with tempfile.TemporaryDirectory(prefix="codex-switcher-prime-") as workdir:
+        command = [
+            str(_codex_binary()), "exec", "--ephemeral", "--ignore-user-config", "--ignore-rules",
+            "--skip-git-repo-check", "--sandbox", "read-only", "--model", AUTO_PRIME_MODEL,
+            "-c", 'model_reasoning_effort="low"', "-C", workdir,
+            prompt,
+        ]
+        completed = subprocess.run(
+            command, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, timeout=90, check=False,
+        )
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout or "Codex CLI exited without details").strip()[-1000:]
+        raise RuntimeError(detail)
+
+    observed_at = epoch()
+    try:
+        usage = parse_wham_usage(fetch_wham_usage(oauth["access_token"], oauth["account_id"]))
+        five = usage.get("five") or {}
+        candidate = int(five["reset_at"]) if five.get("reset_at") is not None else None
+    except Exception as e:
+        candidate = None
+        initial_error = f"Initial quota sync failed after Codex replied: {e}"
+    else:
+        initial_error = None
+
+    # Do not call the request successful yet. Record the first timestamp as a
+    # hidden candidate and re-read quota on the next five-minute sweep. This also acts as
+    # a five-hour duplicate-request guard while verification is pending/failed.
+    plausible = candidate is not None and observed_at + 4 * 3600 <= candidate <= observed_at + 6 * 3600
+    if not plausible:
+        message = initial_error or "Codex replied, but no plausible 5-hour reset candidate was returned"
+        with conn() as c:
+            c.execute(
+                "UPDATE accounts SET prime_candidate_reset_at=?,prime_candidate_observed_at=?,"
+                "prime_verify_after_at=NULL,prime_verify_attempts=0,prime_status='verification_failed',"
+                "prime_error=?,updated_at=? WHERE id=?",
+                (candidate, observed_at, message, observed_at, account_id),
+            )
+        return {"ok": False, "account_id": account_id, "launcher_id": launcher_id, "error": message}
+
+    with conn() as c:
+        c.execute(
+            "UPDATE accounts SET five_hour_reset_at=NULL,prime_next_at=NULL,prime_candidate_reset_at=?,"
+            "prime_candidate_observed_at=?,prime_verify_after_at=?,prime_verify_attempts=0,"
+            "prime_status='verifying',prime_error=NULL,updated_at=? WHERE id=?",
+            (candidate, observed_at, observed_at + AUTO_PRIME_VERIFY_DELAY_SECONDS, observed_at, account_id),
+        )
+    return {
+        "ok": True,
+        "verifying": True,
+        "account_id": account_id,
+        "launcher_id": launcher_id,
+        "candidate_reset_at": candidate,
+        "verify_after_at": observed_at + AUTO_PRIME_VERIFY_DELAY_SECONDS,
+    }
+
+
+def prime_launcher_account(launcher_id, force=False, manual=False):
+    if not _prime_lock.acquire(blocking=False):
+        raise RuntimeError("An auto-prime check is already running")
+    try:
+        try:
+            return _prime_launcher_account(launcher_id, force=force, manual=manual)
+        except Exception as e:
+            with conn() as c:
+                row = c.execute("SELECT account_id FROM launchers WHERE id=?", (str(launcher_id).upper(),)).fetchone()
+                if row and row["account_id"]:
+                    c.execute(
+                        "UPDATE accounts SET prime_status='error',prime_error=?,updated_at=? WHERE id=?",
+                        (str(e)[:1000], epoch(), int(row["account_id"])),
+                    )
+            raise
+    finally:
+        _prime_lock.release()
+
+
+def check_due_auto_primes(include_unscheduled=False):
+    """Run every due durable reset task; optionally discover accounts with no task."""
+    if not _prime_lock.acquire(blocking=False):
+        return []
+    results = []
+    try:
+        with conn() as c:
+            rows = c.execute(
+                "SELECT l.id launcher_id,a.id account_id FROM launchers l JOIN accounts a ON a.id=l.account_id "
+                "WHERE l.enabled=1 AND a.bound_account_id IS NOT NULL ORDER BY l.id"
+            ).fetchall()
+        seen = set()
+        for row in rows:
+            account_id = int(row["account_id"])
+            if account_id in seen:
+                continue
+            seen.add(account_id)
+            try:
+                with conn() as c:
+                    pending = c.execute(
+                        "SELECT prime_status,prime_verify_after_at FROM accounts WHERE id=?",
+                        (account_id,),
+                    ).fetchone()
+                if (
+                    pending
+                    and pending["prime_status"] == "verifying"
+                    and pending["prime_verify_after_at"] is not None
+                    and int(pending["prime_verify_after_at"]) <= epoch()
+                ):
+                    results.append(_verify_pending_prime(account_id, row["launcher_id"]))
+                with conn() as c:
+                    account = c.execute(
+                        "SELECT prime_next_at,prime_last_attempt_at,prime_status FROM accounts WHERE id=?",
+                        (account_id,),
+                    ).fetchone()
+                scheduled_due = bool(
+                    account
+                    and account["prime_next_at"] is not None
+                    and int(account["prime_next_at"]) <= epoch()
+                )
+                failed_cooldown_due = bool(
+                    account
+                    and account["prime_status"] == "verification_failed"
+                    and account["prime_last_attempt_at"] is not None
+                    and int(account["prime_last_attempt_at"]) + 5 * 3600 <= epoch()
+                )
+                if include_unscheduled or scheduled_due or failed_cooldown_due:
+                    results.append(_prime_launcher_account(row["launcher_id"], force=False))
+            except Exception as e:
+                with conn() as c:
+                    c.execute(
+                        "UPDATE accounts SET prime_status='error',prime_error=?,updated_at=? WHERE id=?",
+                        (str(e)[:1000], epoch(), account_id),
+                    )
+                results.append({"ok": False, "account_id": account_id, "launcher_id": row["launcher_id"], "error": str(e)})
+        return results
+    finally:
+        _prime_lock.release()
+
+
+def run_auto_prime_cycle(discover_unscheduled=False, now=None):
+    """Run one unified scheduler tick and return compact diagnostic results."""
+    if not _scheduler_lock.acquire(blocking=False):
+        return {"skipped": "scheduler_busy"}
+    try:
+        now = int(now or epoch())
+        with conn() as c:
+            last_full_sync = int(state_get(c, "last_global_sync_at", 0) or 0)
+        full_sync_due = now >= last_full_sync + GLOBAL_SYNC_INTERVAL_SECONDS
+        sync_result = sync_all_bound_accounts() if full_sync_due else None
+        prime_results = check_due_auto_primes(include_unscheduled=discover_unscheduled or full_sync_due)
+        return {
+            "full_sync_due": full_sync_due,
+            "sync": sync_result,
+            "prime_results": prime_results,
+        }
+    finally:
+        _scheduler_lock.release()
+
+
+def auto_prime_worker(stop_event):
+    # The database is the durable task queue: prime_next_at is the next exact
+    # reset job and prime_verify_after_at is a non-consuming verification job.
+    # One unified five-minute sweep handles reset jobs, delayed verification,
+    # and verification retries. Full-account sync/discovery becomes due every
+    # hour but is executed by this same loop.
+    first_pass = True
+    while not stop_event.is_set():
+        try:
+            run_auto_prime_cycle(discover_unscheduled=first_pass)
+            first_pass = False
+        except Exception as e:
+            print(f"Auto-prime check failed: {e}", file=sys.stderr)
+        if stop_event.wait(AUTO_PRIME_TASK_SWEEP_INTERVAL_SECONDS):
+            break
 
 def set_custom_five_hour_reset(aid, target_ts):
     aid = int(aid)
@@ -1167,6 +1631,7 @@ class Handler(SimpleHTTPRequestHandler):
             if path == "/api/settings":
                 lang = d.get("language")
                 appearance = d.get("appearance")
+                inspection_mode = d.get("inspection_mode")
                 port = d.get("port")
                 welcome_seen = d.get("welcome_seen")
                 five_hour_danger_threshold = d.get("five_hour_danger_threshold")
@@ -1182,6 +1647,10 @@ class Handler(SimpleHTTPRequestHandler):
                         if appearance not in ("dark", "light"):
                             raise ValueError("Unsupported appearance")
                         state_set(c, "appearance", appearance)
+                    if inspection_mode is not None:
+                        if not isinstance(inspection_mode, bool):
+                            raise ValueError("Inspection mode must be a boolean")
+                        state_set(c, "inspection_mode", "1" if inspection_mode else "0")
                     if port is not None:
                         port = int(port)
                         if port < 1024 or port > 65535:
@@ -1206,9 +1675,9 @@ class Handler(SimpleHTTPRequestHandler):
                         state_set(c, "official_sync_interval_minutes", value)
                     if global_sync_interval_hours is not None:
                         value = int(global_sync_interval_hours)
-                        if value < 1 or value > 168:
-                            raise ValueError("Global sync interval must be between 1 and 168 hours")
-                        state_set(c, "global_sync_interval_hours", value)
+                        if value != DEFAULT_GLOBAL_SYNC_INTERVAL_HOURS:
+                            raise ValueError("Full-account sync interval is fixed at 1 hour")
+                        state_set(c, "global_sync_interval_hours", DEFAULT_GLOBAL_SYNC_INTERVAL_HOURS)
                 return self.send_json(get_state())
 
             if path == "/api/launcher":
@@ -1258,6 +1727,11 @@ class Handler(SimpleHTTPRequestHandler):
                     raise ValueError("Unsupported user type")
                 aid = d.get("id")
                 t = epoch()
+                auto_prime_enabled = d.get("auto_prime_enabled")
+                if auto_prime_enabled is not None and not isinstance(auto_prime_enabled, bool):
+                    raise ValueError("Auto-prime enabled must be a boolean")
+                prime_start = d.get("prime_active_start_minute")
+                prime_end = d.get("prime_active_end_minute")
                 with conn() as c:
                     if aid:
                         aid = int(aid)
@@ -1267,12 +1741,27 @@ class Handler(SimpleHTTPRequestHandler):
                         if existing["bound_account_id"] and "reset_count" in d and int(d.get("reset_count", existing["reset_count"])) != int(existing["reset_count"] or 0):
                             raise ValueError("Bound account reset count is read-only; use Sync now")
                         reset_count = int(existing["reset_count"] or 0) if existing["bound_account_id"] else max(0, int(d.get("reset_count", existing["reset_count"])))
-                        c.execute("UPDATE accounts SET name=?,user_type=?,reset_count=?,updated_at=? WHERE id=?", (name, user_type, reset_count, t, aid))
+                        enabled = int(existing["auto_prime_enabled"] if auto_prime_enabled is None else auto_prime_enabled)
+                        start = int(existing["prime_active_start_minute"] or 0) if prime_start is None else _minutes_from_midnight(prime_start, "Prime start")
+                        end = int(existing["prime_active_end_minute"] or 0) if prime_end is None else _minutes_from_midnight(prime_end, "Prime end")
+                        c.execute(
+                            "UPDATE accounts SET name=?,user_type=?,reset_count=?,auto_prime_enabled=?,"
+                            "prime_active_start_minute=?,prime_active_end_minute=?,updated_at=? WHERE id=?",
+                            (name, user_type, reset_count, enabled, start, end, t, aid),
+                        )
                     else:
                         if c.execute("SELECT COUNT(*) n FROM accounts").fetchone()["n"] >= MAX_ACCOUNTS:
                             raise ValueError(f"Maximum {MAX_ACCOUNTS} account mnemonics")
                         reset_count = max(0, int(d.get("reset_count", 0)))
-                        c.execute("INSERT INTO accounts(name,user_type,weekly_remaining,five_hour_reset_at,weekly_reset_at,reset_count,created_at,updated_at) VALUES(?,?,100,NULL,NULL,?,?,?)", (name, user_type, reset_count, t, t))
+                        enabled = 1 if auto_prime_enabled is None else int(auto_prime_enabled)
+                        start = 0 if prime_start is None else _minutes_from_midnight(prime_start, "Prime start")
+                        end = 0 if prime_end is None else _minutes_from_midnight(prime_end, "Prime end")
+                        c.execute(
+                            "INSERT INTO accounts(name,user_type,weekly_remaining,five_hour_reset_at,weekly_reset_at,reset_count,"
+                            "auto_prime_enabled,prime_active_start_minute,prime_active_end_minute,created_at,updated_at) "
+                            "VALUES(?,?,100,NULL,NULL,?,?,?,?,?,?)",
+                            (name, user_type, reset_count, enabled, start, end, t, t),
+                        )
                 return self.send_json(get_state())
 
             if path == "/api/account/delete":
@@ -1293,6 +1782,19 @@ class Handler(SimpleHTTPRequestHandler):
             if path == "/api/account/sync-global":
                 result = sync_all_bound_accounts()
                 return self.send_json({"ok": True, **result})
+
+            if path == "/api/account/prime-one":
+                result = prime_launcher_account(d.get("launcher_id"), manual=True)
+                return self.send_json({"ok": bool(result.get("ok")), "result": result, "state": get_state()})
+
+            if path == "/api/account/prime-check":
+                threading.Thread(
+                    target=run_auto_prime_cycle,
+                    kwargs={"discover_unscheduled": True},
+                    daemon=True,
+                    name="auto-prime-wake-check",
+                ).start()
+                return self.send_json({"ok": True})
 
             if path == "/api/account/weekly":
                 aid, weekly = int(d["id"]), max(0, min(100, int(d["weekly_remaining"])))
@@ -1479,7 +1981,6 @@ def configured_port():
 
 
 def main():
-    import threading
     # Keep a stable cwd even if the app was opened from a folder that is later
     # renamed, moved to Trash, or removed. Static serving does not depend on cwd,
     # but third-party/stdlib helpers may still query it.
@@ -1503,6 +2004,9 @@ def main():
     stop_event = threading.Event()
     reset_thread = threading.Thread(target=weekly_reset_worker, args=(stop_event,), daemon=True, name="weekly-reset-checker")
     reset_thread.start()
+    if os.environ.get("CODEX_SWITCHER_DISABLE_AUTO_PRIME") != "1":
+        prime_thread = threading.Thread(target=auto_prime_worker, args=(stop_event,), daemon=True, name="auto-prime-checker")
+        prime_thread.start()
     if "--open" in sys.argv:
         # Open after the server has had a moment to bind.
         threading.Timer(0.6, lambda: webbrowser.open(f"http://{HOST}:{listen_port}/?v={APP_VERSION}")).start()

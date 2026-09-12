@@ -16,8 +16,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         guard loadRuntimeConfiguration() else { return }
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(workspaceDidWake),
+            name: NSWorkspace.didWakeNotification,
+            object: nil
+        )
         buildWindow()
         startOrAttachServer()
+    }
+
+    @objc private func workspaceDidWake() {
+        guard let base = launcherURL else { return }
+        var request = URLRequest(url: base.appendingPathComponent("api/account/prime-check"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = Data("{}".utf8)
+        request.timeoutInterval = 2
+        URLSession.shared.dataTask(with: request).resume()
     }
 
     private func loadRuntimeConfiguration() -> Bool {
@@ -397,6 +413,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
         if ownsServer, let process = serverProcess, process.isRunning {
             process.terminate()
             let deadline = Date().addingTimeInterval(1.5)
