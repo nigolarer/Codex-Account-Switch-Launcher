@@ -38,7 +38,7 @@ HOST = os.environ.get("CODEX_LAUNCHER_HOST", "127.0.0.1")
 DEFAULT_PORT = 17831
 PORT_ENV = os.environ.get("CODEX_LAUNCHER_PORT")
 CHATGPT_APP = os.environ.get("CHATGPT_APP", "/Applications/ChatGPT.app")
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.1.1"
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -134,6 +134,23 @@ CREATE TABLE IF NOT EXISTS history (
   switched_at INTEGER NOT NULL,
   reason TEXT NOT NULL DEFAULT 'launch'
 );
+CREATE TABLE IF NOT EXISTS quota_usage_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  account_id INTEGER NOT NULL,
+  launcher_id TEXT NOT NULL,
+  observed_at INTEGER NOT NULL,
+  previous_observed_at INTEGER,
+  five_hour_remaining INTEGER,
+  weekly_remaining INTEGER,
+  five_hour_consumed INTEGER NOT NULL DEFAULT 0,
+  weekly_consumed INTEGER NOT NULL DEFAULT 0,
+  five_hour_reset INTEGER NOT NULL DEFAULT 0,
+  weekly_reset INTEGER NOT NULL DEFAULT 0,
+  source TEXT NOT NULL DEFAULT 'sync',
+  FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS quota_usage_logs_account_observed
+  ON quota_usage_logs(account_id, observed_at DESC, id DESC);
 """
 
 DEFAULT_COLORS = {
@@ -160,7 +177,11 @@ AUTO_PRIME_VERIFY_RETRY_SECONDS = 5 * 60
 AUTO_PRIME_VERIFY_MAX_ATTEMPTS = 3
 AUTO_PRIME_RESET_TOLERANCE_SECONDS = 5
 AUTO_PRIME_VERIFY_MAX_REMAINING_SECONDS = 4 * 3600 + 59 * 60
-ALLOWED_OFFICIAL_SYNC_INTERVAL_MINUTES = (5, 30, 60, 180)
+SMART_PRIME_WINDOW_MINUTES = 5 * 60
+SMART_PRIME_EXECUTION_GRACE_SECONDS = 10 * 60
+DEFAULT_SMART_PRIME_WORK_START_MINUTE = 9 * 60
+DEFAULT_SMART_PRIME_ACCOUNT_MINUTES = 60
+ALLOWED_OFFICIAL_SYNC_INTERVAL_MINUTES = (5, 10, 20, 30)
 USER_TYPES = ("Plus", "Pro X10", "Pro X20", "Ultra")
 _prime_lock = threading.Lock()
 _scheduler_lock = threading.Lock()
@@ -369,13 +390,25 @@ def ensure_defaults():
             state_set(c, "five_hour_danger_threshold", DEFAULT_FIVE_HOUR_DANGER_THRESHOLD)
         if state_get(c, "plus_weekly_danger_threshold") is None:
             state_set(c, "plus_weekly_danger_threshold", DEFAULT_PLUS_WEEKLY_DANGER_THRESHOLD)
-        if state_get(c, "official_sync_interval_minutes") is None:
+        if str(state_get(c, "official_sync_interval_minutes")) not in {str(v) for v in ALLOWED_OFFICIAL_SYNC_INTERVAL_MINUTES}:
             state_set(c, "official_sync_interval_minutes", DEFAULT_OFFICIAL_SYNC_INTERVAL_MINUTES)
         # Full-account discovery and the old global sync are now one fixed
         # hourly backend job. Normalize older configurable 6-hour values.
         state_set(c, "global_sync_interval_hours", DEFAULT_GLOBAL_SYNC_INTERVAL_HOURS)
         if state_get(c, "last_global_sync_at") is None:
             state_set(c, "last_global_sync_at", epoch())
+        if state_get(c, "labs_smart_prime_enabled") is None:
+            state_set(c, "labs_smart_prime_enabled", "0")
+        if state_get(c, "labs_smart_prime_work_start_minute") is None:
+            state_set(c, "labs_smart_prime_work_start_minute", DEFAULT_SMART_PRIME_WORK_START_MINUTE)
+        if state_get(c, "labs_smart_prime_account_minutes") is None:
+            state_set(c, "labs_smart_prime_account_minutes", DEFAULT_SMART_PRIME_ACCOUNT_MINUTES)
+        if state_get(c, "labs_smart_prime_last_plan_date") is None:
+            state_set(c, "labs_smart_prime_last_plan_date", "")
+        if state_get(c, "labs_smart_prime_last_status") is None:
+            state_set(c, "labs_smart_prime_last_status", "")
+        if state_get(c, "labs_smart_prime_last_result") is None:
+            state_set(c, "labs_smart_prime_last_result", "")
 
         # Cap persisted switch history, including records created by older versions.
         if table_exists(c, "history"):
@@ -391,6 +424,52 @@ def clamp_percent(value, default):
         return max(0, min(100, int(value)))
     except (TypeError, ValueError):
         return default
+
+
+def record_quota_usage(c, account_id, launcher_id, observed_at, five_remaining, weekly_remaining, source="sync"):
+    """Persist one official quota observation and its delta from the previous observation."""
+    account_id = int(account_id)
+    observed_at = int(observed_at)
+    five_remaining = None if five_remaining is None else clamp_percent(five_remaining, 100)
+    weekly_remaining = None if weekly_remaining is None else clamp_percent(weekly_remaining, 100)
+    previous = c.execute(
+        "SELECT observed_at,five_hour_remaining,weekly_remaining FROM quota_usage_logs "
+        "WHERE account_id=? ORDER BY observed_at DESC,id DESC LIMIT 1",
+        (account_id,),
+    ).fetchone()
+
+    def delta(previous_value, current_value):
+        if previous_value is None or current_value is None:
+            return 0, 0
+        previous_value, current_value = int(previous_value), int(current_value)
+        return max(0, previous_value - current_value), int(current_value > previous_value)
+
+    five_consumed, five_reset = delta(previous["five_hour_remaining"] if previous else None, five_remaining)
+    weekly_consumed, weekly_reset = delta(previous["weekly_remaining"] if previous else None, weekly_remaining)
+    c.execute(
+        "INSERT INTO quota_usage_logs(account_id,launcher_id,observed_at,previous_observed_at,"
+        "five_hour_remaining,weekly_remaining,five_hour_consumed,weekly_consumed,"
+        "five_hour_reset,weekly_reset,source) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            account_id,
+            str(launcher_id or "").upper(),
+            observed_at,
+            int(previous["observed_at"]) if previous else None,
+            five_remaining,
+            weekly_remaining,
+            five_consumed,
+            weekly_consumed,
+            five_reset,
+            weekly_reset,
+            str(source or "sync"),
+        ),
+    )
+    # Five-minute polling can produce hundreds of rows. Keep two days per account.
+    c.execute(
+        "DELETE FROM quota_usage_logs WHERE account_id=? AND id NOT IN "
+        "(SELECT id FROM quota_usage_logs WHERE account_id=? ORDER BY observed_at DESC,id DESC LIMIT 576)",
+        (account_id, account_id),
+    )
 
 
 def account_risk(a, five_threshold, plus_weekly_threshold):
@@ -462,6 +541,14 @@ def get_state():
     active = st.get("active_launcher", "A")
     active_launcher = next((l for l in launchers if l["id"] == active), None)
     active_account_id = active_launcher.get("account_id") if active_launcher else None
+    quota_usage_logs = []
+    if active_account_id:
+        with conn() as c:
+            quota_usage_logs = rows_to_dict(c.execute(
+                "SELECT * FROM quota_usage_logs WHERE account_id=? "
+                "ORDER BY observed_at DESC,id DESC LIMIT 48",
+                (active_account_id,),
+            ).fetchall())
     enabled = [l for l in launchers if l["enabled"]]
 
     next_launcher = None
@@ -509,12 +596,16 @@ def get_state():
         "accounts": accounts,
         "state": st,
         "history": history,
+        "quota_usage_logs": quota_usage_logs,
         "next_launcher": next_launcher,
         "recommendation": recommendation,
         "db_path": str(DB_PATH),
         "max_launchers": MAX_LAUNCHERS,
         "max_accounts": MAX_ACCOUNTS,
-        "labs": {"desktop_ui_backups": desktop_settings_backup_status()},
+        "labs": {
+            "desktop_ui_backups": desktop_settings_backup_status(),
+            "smart_prime_plan": smart_prime_plan(now),
+        },
         "server_time": now,
         "version": APP_VERSION,
         "port": int(st.get("port", DEFAULT_PORT)),
@@ -861,6 +952,14 @@ def sync_real_account(launcher_id):
     values.append(account_id)
     with conn() as c:
         c.execute(f"UPDATE accounts SET {','.join(fields)} WHERE id=?", values)
+        record_quota_usage(
+            c,
+            account_id,
+            launcher_id,
+            now,
+            five.get("remaining"),
+            weekly.get("remaining"),
+        )
     return get_state()
 
 def sync_all_bound_accounts():
@@ -1026,6 +1125,15 @@ def _verify_pending_prime(account_id, launcher_id, now=None):
     values.append(int(account_id))
     with conn() as c:
         c.execute(f"UPDATE accounts SET {','.join(fields)} WHERE id=?", values)
+        record_quota_usage(
+            c,
+            account_id,
+            launcher_id,
+            now,
+            five.get("remaining"),
+            weekly.get("remaining"),
+            source="prime_verification",
+        )
     return {
         "ok": True,
         "verified": True,
@@ -1035,7 +1143,7 @@ def _verify_pending_prime(account_id, launcher_id, now=None):
     }
 
 
-def _prime_launcher_account(launcher_id, force=False, manual=False):
+def _prime_launcher_account(launcher_id, force=False, manual=False, ignore_hours=False):
     launcher_id = str(launcher_id or "").strip().upper()
     now = epoch()
     with conn() as c:
@@ -1048,7 +1156,7 @@ def _prime_launcher_account(launcher_id, force=False, manual=False):
         account_id = int(account["id"])
         if not force and not manual and not int(account["auto_prime_enabled"] or 0):
             return {"ok": False, "skipped": "disabled", "account_id": account_id, "launcher_id": launcher_id}
-        if not force and not manual and not _inside_prime_hours(account, now):
+        if not force and not manual and not ignore_hours and not _inside_prime_hours(account, now):
             c.execute("UPDATE accounts SET prime_status='outside_hours',prime_error=NULL,updated_at=? WHERE id=?", (now, account_id))
             return {"ok": False, "skipped": "outside_hours", "account_id": account_id, "launcher_id": launcher_id}
         if not force and account["prime_next_at"] and int(account["prime_next_at"]) > now:
@@ -1160,7 +1268,183 @@ def prime_launcher_account(launcher_id, force=False, manual=False):
         _prime_lock.release()
 
 
-def check_due_auto_primes(include_unscheduled=False):
+def _smart_prime_settings(c):
+    enabled = state_get(c, "labs_smart_prime_enabled", "0") == "1"
+    try:
+        work_start = _minutes_from_midnight(
+            state_get(c, "labs_smart_prime_work_start_minute", DEFAULT_SMART_PRIME_WORK_START_MINUTE),
+            "Work start",
+        )
+    except ValueError:
+        work_start = DEFAULT_SMART_PRIME_WORK_START_MINUTE
+    try:
+        account_minutes = int(state_get(c, "labs_smart_prime_account_minutes", DEFAULT_SMART_PRIME_ACCOUNT_MINUTES))
+    except (TypeError, ValueError):
+        account_minutes = DEFAULT_SMART_PRIME_ACCOUNT_MINUTES
+    account_minutes = max(5, min(SMART_PRIME_WINDOW_MINUTES, account_minutes))
+    return enabled, work_start, account_minutes
+
+
+def _smart_prime_eligible_launchers(c):
+    """Return one enabled launcher for each eligible bound account."""
+    return c.execute(
+        "SELECT MIN(l.id) launcher_id,a.id account_id FROM launchers l "
+        "JOIN accounts a ON a.id=l.account_id "
+        "WHERE l.enabled=1 AND a.bound_account_id IS NOT NULL "
+        "AND a.auto_prime_enabled=1 AND a.weekly_remaining>=? "
+        "GROUP BY a.id ORDER BY launcher_id",
+        (AUTO_PRIME_WEEKLY_MINIMUM_PERCENT,),
+    ).fetchall()
+
+
+def _local_date_key(ts):
+    return time.strftime("%Y-%m-%d", time.localtime(int(ts)))
+
+
+def _local_day_offset(date_key, days):
+    base = time.strptime(date_key, "%Y-%m-%d")
+    noon = time.mktime((base.tm_year, base.tm_mon, base.tm_mday, 12, 0, 0, -1, -1, -1))
+    return _local_date_key(noon + int(days) * 24 * 3600)
+
+
+def _local_minute_timestamp(date_key, minute):
+    parsed = time.strptime(date_key, "%Y-%m-%d")
+    minute = int(minute)
+    return int(time.mktime((
+        parsed.tm_year, parsed.tm_mon, parsed.tm_mday,
+        minute // 60, minute % 60, 0, -1, -1, -1,
+    )))
+
+
+def _smart_prime_occurrence(date_key, work_start, round_minutes):
+    work_at = _local_minute_timestamp(date_key, work_start)
+    lead_minutes = max(0, SMART_PRIME_WINDOW_MINUTES - int(round_minutes))
+    return {
+        "work_date": date_key,
+        "work_at": work_at,
+        "prime_at": work_at - lead_minutes * 60,
+        "target_reset_at": work_at + int(round_minutes) * 60,
+        "lead_minutes": lead_minutes,
+    }
+
+
+def _smart_prime_relevant_occurrence(now, work_start, round_minutes):
+    today = _local_date_key(now)
+    today_plan = _smart_prime_occurrence(today, work_start, round_minutes)
+    tomorrow_plan = _smart_prime_occurrence(_local_day_offset(today, 1), work_start, round_minutes)
+    if now >= tomorrow_plan["prime_at"]:
+        return tomorrow_plan
+    return today_plan
+
+
+def smart_prime_plan(now=None):
+    """Return the persisted Labs plan plus a deterministic local-time preview."""
+    now = int(now or epoch())
+    with conn() as c:
+        enabled, work_start, account_minutes = _smart_prime_settings(c)
+        eligible = _smart_prime_eligible_launchers(c)
+        last_date = state_get(c, "labs_smart_prime_last_plan_date", "")
+        last_status = state_get(c, "labs_smart_prime_last_status", "")
+        last_result = state_get(c, "labs_smart_prime_last_result", "")
+    account_count = len(eligible)
+    round_minutes = account_count * account_minutes
+    occurrence = _smart_prime_relevant_occurrence(now, work_start, round_minutes)
+    if not enabled:
+        status = "disabled"
+    elif account_count == 0:
+        status = "no_accounts"
+    elif round_minutes >= SMART_PRIME_WINDOW_MINUTES:
+        status = "not_needed"
+    elif last_date == occurrence["work_date"] and last_status:
+        status = last_status
+    elif now > occurrence["prime_at"] + SMART_PRIME_EXECUTION_GRACE_SECONDS:
+        status = "missed"
+    else:
+        status = "waiting"
+    parsed_result = None
+    if last_result:
+        try:
+            parsed_result = json.loads(last_result)
+        except json.JSONDecodeError:
+            parsed_result = None
+    return {
+        "enabled": enabled,
+        "work_start_minute": work_start,
+        "account_minutes": account_minutes,
+        "account_count": account_count,
+        "round_minutes": round_minutes,
+        **occurrence,
+        "status": status,
+        "last_plan_date": last_date,
+        "last_status": last_status,
+        "last_result": parsed_result,
+        "execution_grace_minutes": SMART_PRIME_EXECUTION_GRACE_SECONDS // 60,
+    }
+
+
+def run_daily_smart_prime(now=None):
+    """Run today's first-round alignment only near its planned time; never catch up late."""
+    now = int(now or epoch())
+    with conn() as c:
+        enabled, work_start, account_minutes = _smart_prime_settings(c)
+        eligible = _smart_prime_eligible_launchers(c)
+        last_date = state_get(c, "labs_smart_prime_last_plan_date", "")
+        last_status = state_get(c, "labs_smart_prime_last_status", "")
+        today = _local_date_key(now)
+        candidates = [
+            _smart_prime_occurrence(today, work_start, len(eligible) * account_minutes),
+            _smart_prime_occurrence(_local_day_offset(today, 1), work_start, len(eligible) * account_minutes),
+        ]
+    if not enabled or not eligible or len(eligible) * account_minutes >= SMART_PRIME_WINDOW_MINUTES:
+        return None
+
+    due = next((p for p in candidates if p["prime_at"] <= now <= p["prime_at"] + SMART_PRIME_EXECUTION_GRACE_SECONDS), None)
+    if due and (last_date != due["work_date"] or last_status == "waiting"):
+        with conn() as c:
+            state_set(c, "labs_smart_prime_last_plan_date", due["work_date"])
+            state_set(c, "labs_smart_prime_last_status", "running")
+            state_set(c, "labs_smart_prime_last_result", "")
+        results = []
+        if not _prime_lock.acquire(blocking=False):
+            with conn() as c:
+                state_set(c, "labs_smart_prime_last_status", "waiting")
+            return {"status": "scheduler_busy", **due}
+        try:
+            for row in eligible:
+                try:
+                    results.append(_prime_launcher_account(row["launcher_id"], ignore_hours=True))
+                except Exception as e:
+                    results.append({
+                        "ok": False,
+                        "launcher_id": row["launcher_id"],
+                        "account_id": int(row["account_id"]),
+                        "error": str(e),
+                    })
+        finally:
+            _prime_lock.release()
+        successful = sum(1 for result in results if result.get("ok"))
+        status = "completed" if successful == len(results) else "partial"
+        summary = {"successful": successful, "total": len(results), "results": results}
+        with conn() as c:
+            state_set(c, "labs_smart_prime_last_status", status)
+            state_set(c, "labs_smart_prime_last_result", json.dumps(summary, ensure_ascii=False))
+        return {"status": status, "result": summary, **due}
+
+    today_due = candidates[0]
+    if (
+        last_date != today_due["work_date"]
+        and today_due["prime_at"] + SMART_PRIME_EXECUTION_GRACE_SECONDS < now
+        and now < _local_minute_timestamp(_local_day_offset(today, 1), work_start)
+    ):
+        with conn() as c:
+            state_set(c, "labs_smart_prime_last_plan_date", today_due["work_date"])
+            state_set(c, "labs_smart_prime_last_status", "missed")
+            state_set(c, "labs_smart_prime_last_result", "")
+        return {"status": "missed", **today_due}
+    return None
+
+
+def check_due_auto_primes(include_unscheduled=False, due_not_before=None):
     """Run every due durable reset task; optionally discover accounts with no task."""
     if not _prime_lock.acquire(blocking=False):
         return []
@@ -1199,12 +1483,14 @@ def check_due_auto_primes(include_unscheduled=False):
                     account
                     and account["prime_next_at"] is not None
                     and int(account["prime_next_at"]) <= epoch()
+                    and (due_not_before is None or int(account["prime_next_at"]) >= int(due_not_before))
                 )
                 failed_cooldown_due = bool(
                     account
                     and account["prime_status"] == "verification_failed"
                     and account["prime_last_attempt_at"] is not None
                     and int(account["prime_last_attempt_at"]) + 5 * 3600 <= epoch()
+                    and (due_not_before is None or int(account["prime_last_attempt_at"]) >= int(due_not_before))
                 )
                 if include_unscheduled or scheduled_due or failed_cooldown_due:
                     results.append(_prime_launcher_account(row["launcher_id"], force=False))
@@ -1228,12 +1514,44 @@ def run_auto_prime_cycle(discover_unscheduled=False, now=None):
         now = int(now or epoch())
         with conn() as c:
             last_full_sync = int(state_get(c, "last_global_sync_at", 0) or 0)
+            interval = int(state_get(c, "official_sync_interval_minutes", DEFAULT_OFFICIAL_SYNC_INTERVAL_MINUTES))
+            active_launcher = state_get(c, "active_launcher", "")
+            active = c.execute(
+                "SELECT a.bound_account_id,a.last_sync_at FROM launchers l "
+                "JOIN accounts a ON a.id=l.account_id "
+                "WHERE l.id=? AND l.enabled=1",
+                (active_launcher,),
+            ).fetchone()
         full_sync_due = now >= last_full_sync + GLOBAL_SYNC_INTERVAL_SECONDS
         sync_result = sync_all_bound_accounts() if full_sync_due else None
-        prime_results = check_due_auto_primes(include_unscheduled=discover_unscheduled or full_sync_due)
+        active_sync_due = bool(
+            not full_sync_due and active and active["bound_account_id"]
+            and now >= int(active["last_sync_at"] or 0) + interval * 60
+        )
+        active_sync_result = None
+        if active_sync_due:
+            try:
+                sync_real_account(active_launcher)
+                active_sync_result = {"launcher_id": active_launcher, "ok": True}
+            except Exception as e:
+                active_sync_result = {"launcher_id": active_launcher, "ok": False, "error": str(e)}
+        smart_prime_result = run_daily_smart_prime(now)
+        smart_plan = smart_prime_plan(now)
+        smart_enabled = bool(smart_plan["enabled"])
+        # In Labs smart mode, stale windows from a previous workday must not be
+        # restarted at launch/full-sync time. A window naturally started during
+        # this workday has a later reset timestamp and remains eligible here.
+        due_not_before = smart_plan["work_at"] if smart_enabled else None
+        prime_results = check_due_auto_primes(
+            include_unscheduled=(discover_unscheduled or full_sync_due) and not smart_enabled,
+            due_not_before=due_not_before,
+        )
         return {
             "full_sync_due": full_sync_due,
             "sync": sync_result,
+            "active_sync_due": active_sync_due,
+            "active_sync": active_sync_result,
+            "smart_prime": smart_prime_result,
             "prime_results": prime_results,
         }
     finally:
@@ -1244,8 +1562,8 @@ def auto_prime_worker(stop_event):
     # The database is the durable task queue: prime_next_at is the next exact
     # reset job and prime_verify_after_at is a non-consuming verification job.
     # One unified five-minute sweep handles reset jobs, delayed verification,
-    # and verification retries. Full-account sync/discovery becomes due every
-    # hour but is executed by this same loop.
+    # and verification retries. The active account is synced at its configured
+    # cadence; full-account sync/discovery is due hourly in this same loop.
     first_pass = True
     while not stop_event.is_set():
         try:
@@ -1628,6 +1946,25 @@ class Handler(SimpleHTTPRequestHandler):
                 result = open_launcher_skills_dir(d.get("id"))
                 return self.send_json({"ok": True, **result})
 
+            if path == "/api/labs/smart-prime-settings":
+                enabled = d.get("enabled")
+                if not isinstance(enabled, bool):
+                    raise ValueError("Smart prime enabled must be a boolean")
+                work_start = _minutes_from_midnight(d.get("work_start_minute"), "Work start")
+                account_minutes = int(d.get("account_minutes"))
+                if account_minutes < 5 or account_minutes > SMART_PRIME_WINDOW_MINUTES:
+                    raise ValueError("Per-account duration must be between 5 and 300 minutes")
+                with conn() as c:
+                    state_set(c, "labs_smart_prime_enabled", "1" if enabled else "0")
+                    state_set(c, "labs_smart_prime_work_start_minute", work_start)
+                    state_set(c, "labs_smart_prime_account_minutes", account_minutes)
+                threading.Thread(
+                    target=run_auto_prime_cycle,
+                    daemon=True,
+                    name="smart-prime-settings-check",
+                ).start()
+                return self.send_json(get_state())
+
             if path == "/api/settings":
                 lang = d.get("language")
                 appearance = d.get("appearance")
@@ -1671,7 +2008,7 @@ class Handler(SimpleHTTPRequestHandler):
                     if official_sync_interval_minutes is not None:
                         value = int(official_sync_interval_minutes)
                         if value not in ALLOWED_OFFICIAL_SYNC_INTERVAL_MINUTES:
-                            raise ValueError("Official sync interval must be 5, 30, 60, or 180 minutes")
+                            raise ValueError("Official sync interval must be 5, 10, 20, or 30 minutes")
                         state_set(c, "official_sync_interval_minutes", value)
                     if global_sync_interval_hours is not None:
                         value = int(global_sync_interval_hours)

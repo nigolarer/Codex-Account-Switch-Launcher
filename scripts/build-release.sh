@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-VERSION="1.1.0"
+VERSION="1.1.1"
 PRODUCT="Codex Switcher"
 APP_NAME="$PRODUCT.app"
 BUILD_ROOT="$ROOT/build/release"

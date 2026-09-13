@@ -58,6 +58,8 @@ Account aliases are local labels only. They are not verified OpenAI identities, 
 
 ## Automatic 5-Hour Window Priming
 
+The bound account on the active launcher can sync its official quota every 5, 10, 20, or 30 minutes (30 minutes by default) to refresh its fast-changing 5-hour balance. The existing five-minute background loop checks this task; all bound accounts still receive an hourly full sync.
+
 Auto-prime is enabled by default for bound accounts. Codex Switcher performs one unified full sync of all bound accounts every hour, and a verified `prime_next_at` also serves as the durable next 5H reset job. One background loop runs every five minutes and batches every due reset, delayed verification, and verification retry. When a new window is needed and the account is inside its configured active hours, it runs a temporary read-only Codex CLI session with that launcher's `CODEX_HOME` and sends a random two-digit addition problem whose operands and result are at most 100 using the low-usage model. The first reset timestamp is only a candidate: quota is synced again after at least five minutes, and success requires the absolute timestamp to drift by no more than five seconds while its remaining countdown has fallen below 4 hours 59 minutes. Network or validation failures retry only the quota read in a later five-minute task, never the prompt.
 
 - Active hours default to 24 hours and can be configured per account, including overnight ranges.
@@ -67,6 +69,13 @@ Auto-prime is enabled by default for bound accounts. Codex Switcher performs one
 - Codex runs with `--ephemeral`, so no Session is persisted or shown in normal task history and no archive step is needed. It does not quit, switch, or focus ChatGPT Desktop.
 - Codex Switcher must remain running; fully quitting the app also stops background checks.
 
+The Labs **Smart first-round daily priming** experiment uses a usual work start, an estimated per-account duration, and the number of distinct eligible accounts to calculate the day's first priming time. With three 60-minute accounts and a 09:00 work start, for example, it attempts to prime at 07:00 so the windows reset around 12:00 as the first round is exhausted.
+
+- The plan optimizes only the first daily round and does not promise uninterrupted long-session coverage.
+- Advance priming is unnecessary when one account round already lasts at least five hours.
+- The scheduler allows up to 10 minutes of delay. If the app is not running, the Mac sleeps, or a network problem causes the plan to be missed, it does not bulk-prime late and accidentally align every account at the wrong time.
+- When enabled, app launch and hourly sync no longer bulk-prime unscheduled accounts. Windows naturally started during the workday still continue normally when their real five-hour reset becomes due.
+
 ## Installation
 
 ### GitHub Release
@@ -74,7 +83,7 @@ Auto-prime is enabled by default for bound accounts. Codex Switcher performs one
 Download:
 
 ```text
-Codex-Switcher-v1.1.0-macOS-arm64.zip
+Codex-Switcher-v1.1.1-macOS-arm64.zip
 ```
 
 Then:
@@ -108,7 +117,7 @@ The build script:
 Output:
 
 ```text
-release/Codex-Switcher-v1.1.0-macOS-arm64.zip
+release/Codex-Switcher-v1.1.1-macOS-arm64.zip
 ```
 
 ### Local development install
@@ -270,13 +279,13 @@ A future Developer ID signed and notarized build can remove this extra step.
 Current public release:
 
 ```text
-v1.1.0
+v1.1.1
 ```
 
 Release asset:
 
 ```text
-Codex-Switcher-v1.1.0-macOS-arm64.zip
+Codex-Switcher-v1.1.1-macOS-arm64.zip
 ```
 
 ### v0.21.2 stale backend fix
@@ -284,6 +293,12 @@ Codex-Switcher-v1.1.0-macOS-arm64.zip
 The native app now verifies both the backend version and the static UI before reusing an existing local service. If an older Codex Switcher backend is still listening after the source folder was renamed or moved, the app safely replaces that stale backend instead of attaching to it and showing a 404 page. Release builds also validate that `runtime/static/index.html` is present.
 
 ## Release notes
+
+### v1.1.1 Labs smart first-round daily priming
+
+- Calculates the daily first priming and estimated reset times from the work start, per-account duration, and eligible account count.
+- Never bulk-primes late after a missed plan, avoiding accidental alignment at the wrong time.
+- Skips advance priming when a round already lasts five hours and preserves normal continuation for windows naturally started during the workday.
 
 ### v1.0.3 Bound quota read-only polish
 
