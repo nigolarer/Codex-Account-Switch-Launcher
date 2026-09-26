@@ -97,6 +97,9 @@ CREATE TABLE IF NOT EXISTS accounts (
   bound_auth_home TEXT,
   bound_at INTEGER,
   last_sync_at INTEGER,
+  sync_error TEXT,
+  sync_error_code TEXT,
+  sync_error_at INTEGER,
   auto_prime_enabled INTEGER NOT NULL DEFAULT 1,
   prime_active_start_minute INTEGER NOT NULL DEFAULT 0,
   prime_active_end_minute INTEGER NOT NULL DEFAULT 0,
@@ -322,6 +325,9 @@ def migrate_schema_v8(c):
         ("bound_auth_home", "TEXT"),
         ("bound_at", "INTEGER"),
         ("last_sync_at", "INTEGER"),
+        ("sync_error", "TEXT"),
+        ("sync_error_code", "TEXT"),
+        ("sync_error_at", "INTEGER"),
         ("auto_prime_enabled", "INTEGER NOT NULL DEFAULT 1"),
         ("prime_active_start_minute", "INTEGER NOT NULL DEFAULT 0"),
         ("prime_active_end_minute", "INTEGER NOT NULL DEFAULT 0"),
@@ -337,6 +343,14 @@ def migrate_schema_v8(c):
     ):
         if name not in cols:
             c.execute(f"ALTER TABLE accounts ADD COLUMN {name} {decl}")
+    c.execute(
+        "UPDATE accounts SET sync_error_code='login_required' "
+        "WHERE sync_error IS NOT NULL AND sync_error_code IS NULL AND ("
+        "lower(sync_error) LIKE '%codex login is expired or unauthorized%' OR "
+        "lower(sync_error) LIKE '%no codex auth.json found%' OR "
+        "lower(sync_error) LIKE '%does not have a chatgpt oauth account%' OR "
+        "lower(sync_error) LIKE '%cannot read codex auth.json%')"
+    )
 
 
 def ensure_defaults():
@@ -849,6 +863,29 @@ def fetch_wham_usage(access_token, account_id):
         raise ValueError("Quota service returned invalid JSON")
 
 
+def _sync_error_code(error):
+    message = str(error or "").lower()
+    if (
+        "codex login is expired or unauthorized" in message
+        or "no codex auth.json found" in message
+        or "does not have a chatgpt oauth account" in message
+        or ("cannot read codex auth.json" in message)
+    ):
+        return "login_required"
+    return None
+
+
+def _record_sync_error(account_id, error):
+    if not account_id:
+        return
+    now = epoch()
+    with conn() as c:
+        c.execute(
+            "UPDATE accounts SET sync_error=?,sync_error_code=?,sync_error_at=?,updated_at=? WHERE id=?",
+            (str(error), _sync_error_code(error), now, now, account_id),
+        )
+
+
 def bind_real_account(launcher_id):
     launcher_id = str(launcher_id or "").strip().upper()
     with conn() as c:
@@ -872,43 +909,48 @@ def bind_real_account(launcher_id):
 
 def sync_real_account(launcher_id):
     launcher_id = str(launcher_id or "").strip().upper()
-    with conn() as c:
-        launcher_row = c.execute("SELECT * FROM launchers WHERE id=?", (launcher_id,)).fetchone()
-        if not launcher_row:
-            raise ValueError("Unknown launcher")
-        account_id = launcher_row["account_id"]
-        if not account_id:
-            raise ValueError("This launcher has no account mnemonic")
-        account_row = c.execute("SELECT * FROM accounts WHERE id=?", (account_id,)).fetchone()
-        if not account_row:
-            raise ValueError("Unknown account mnemonic")
-        if not account_row["bound_account_id"]:
-            raise ValueError("This account mnemonic has not been bound to a real Codex account")
-        oauth = read_launcher_oauth(launcher_row)
-        if oauth["account_id"] != account_row["bound_account_id"]:
-            # The user may have signed out/in to another already-bound Codex account
-            # inside this launcher without updating Codex Switcher first. Try to repair
-            # the local launcher→mnemonic mapping automatically before treating it as
-            # an error. This keeps the real-account binding authoritative while making
-            # manual in-app account switches self-healing on the next Sync now.
-            matched_account = c.execute(
-                "SELECT * FROM accounts WHERE bound_account_id=? ORDER BY id LIMIT 1",
-                (oauth["account_id"],),
-            ).fetchone()
-            if not matched_account:
-                raise ValueError("The launcher is signed in to a different Codex account and no matching local bound account was found")
-            account_id = int(matched_account["id"])
-            account_row = matched_account
-            c.execute(
-                "UPDATE launchers SET account_id=?,updated_at=? WHERE id=?",
-                (account_id, epoch(), launcher_id),
-            )
+    account_id = None
+    try:
+        with conn() as c:
+            launcher_row = c.execute("SELECT * FROM launchers WHERE id=?", (launcher_id,)).fetchone()
+            if not launcher_row:
+                raise ValueError("Unknown launcher")
+            account_id = launcher_row["account_id"]
+            if not account_id:
+                raise ValueError("This launcher has no account mnemonic")
+            account_row = c.execute("SELECT * FROM accounts WHERE id=?", (account_id,)).fetchone()
+            if not account_row:
+                raise ValueError("Unknown account mnemonic")
+            if not account_row["bound_account_id"]:
+                raise ValueError("This account mnemonic has not been bound to a real Codex account")
+            oauth = read_launcher_oauth(launcher_row)
+            if oauth["account_id"] != account_row["bound_account_id"]:
+                # The user may have signed out/in to another already-bound Codex account
+                # inside this launcher without updating Codex Switcher first. Try to repair
+                # the local launcher→mnemonic mapping automatically before treating it as
+                # an error. This keeps the real-account binding authoritative while making
+                # manual in-app account switches self-healing on the next Sync now.
+                matched_account = c.execute(
+                    "SELECT * FROM accounts WHERE bound_account_id=? ORDER BY id LIMIT 1",
+                    (oauth["account_id"],),
+                ).fetchone()
+                if not matched_account:
+                    raise ValueError("The launcher is signed in to a different Codex account and no matching local bound account was found")
+                account_id = int(matched_account["id"])
+                account_row = matched_account
+                c.execute(
+                    "UPDATE launchers SET account_id=?,updated_at=? WHERE id=?",
+                    (account_id, epoch(), launcher_id),
+                )
 
-    usage = parse_wham_usage(fetch_wham_usage(oauth["access_token"], oauth["account_id"]))
+        usage = parse_wham_usage(fetch_wham_usage(oauth["access_token"], oauth["account_id"]))
+    except Exception as error:
+        _record_sync_error(account_id, error)
+        raise
     five = usage.get("five") or {}
     weekly = usage.get("weekly") or {}
     now = epoch()
-    fields = ["last_sync_at=?", "bound_plan_type=?", "updated_at=?"]
+    fields = ["last_sync_at=?", "bound_plan_type=?", "sync_error=NULL", "sync_error_code=NULL", "sync_error_at=NULL", "updated_at=?"]
     values = [now, usage.get("plan_type"), now]
     if five.get("remaining") is not None:
         five_remaining = max(0, min(100, int(five["remaining"])))
@@ -1011,8 +1053,11 @@ def _inside_prime_hours(account, now=None):
 
 
 def _codex_binary():
+    resources = Path(CHATGPT_APP) / "Contents/Resources"
     candidates = [
-        Path(CHATGPT_APP) / "Contents/Resources/codex",
+        resources / "codex-cli/bin/codex",
+        resources / "codex-cli/CodexCLI.app/Contents/MacOS/codex",
+        resources / "codex",
         Path("/Applications/Codex.app/Contents/Resources/codex"),
     ]
     for candidate in candidates:
@@ -1021,7 +1066,7 @@ def _codex_binary():
     found = shutil.which("codex")
     if found:
         return Path(found)
-    raise RuntimeError("Codex CLI was not found. Update or reinstall ChatGPT Desktop.")
+    raise RuntimeError("Codex CLI was not found in ChatGPT Desktop or PATH. Update or reinstall ChatGPT Desktop.")
 
 
 def _random_prime_prompt():
