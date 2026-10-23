@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import json
+from datetime import datetime, timezone
 import os
 import random
 import re
@@ -92,6 +93,9 @@ CREATE TABLE IF NOT EXISTS accounts (
   five_hour_reset_at INTEGER,
   weekly_reset_at INTEGER,
   reset_count INTEGER NOT NULL DEFAULT 0 CHECK(reset_count >= 0),
+  reset_credit_expirations TEXT,
+  reset_credits_sync_at INTEGER,
+  reset_credits_error TEXT,
   bound_account_id TEXT,
   bound_plan_type TEXT,
   bound_auth_home TEXT,
@@ -320,6 +324,9 @@ def migrate_schema_v8(c):
     # v0.22.4: persist real Codex/ChatGPT account binding in the stable user DB.
     # These fields intentionally store identifiers/metadata only, never OAuth tokens.
     for name, decl in (
+        ("reset_credit_expirations", "TEXT"),
+        ("reset_credits_sync_at", "INTEGER"),
+        ("reset_credits_error", "TEXT"),
         ("bound_account_id", "TEXT"),
         ("bound_plan_type", "TEXT"),
         ("bound_auth_home", "TEXT"),
@@ -494,6 +501,19 @@ def account_risk(a, five_threshold, plus_weekly_threshold):
     return {"five_hour_low": five_low, "weekly_low": weekly_low, "dangerous": five_low or weekly_low}
 
 
+def recommendation_eligible(a, now):
+    """Every insufficient quota must have a known recovery within 30 minutes."""
+    if not a:
+        return False
+    for remaining, reset in (("weekly_remaining", "weekly_reset_at"),
+                             ("five_hour_remaining", "five_hour_reset_at")):
+        if int(a.get(remaining, 100) or 0) < 5:
+            reset_at = a.get(reset)
+            if not reset_at or not now < int(reset_at) <= now + 30 * 60:
+                return False
+    return True
+
+
 def get_state():
     now = epoch()
     with conn() as c:
@@ -529,6 +549,9 @@ def get_state():
             (now, now),
         )
         accounts = rows_to_dict(c.execute("SELECT * FROM accounts ORDER BY id").fetchall())
+        for account in accounts:
+            raw = account["reset_credit_expirations"]
+            account["reset_credit_expirations"] = json.loads(raw) if raw is not None else None
         launchers = rows_to_dict(c.execute("SELECT * FROM launchers ORDER BY id").fetchall())
         st = {r["key"]: r["value"] for r in c.execute("SELECT key,value FROM state")}
         history = rows_to_dict(c.execute("SELECT * FROM history ORDER BY id DESC LIMIT 6").fetchall())
@@ -555,6 +578,8 @@ def get_state():
     active = st.get("active_launcher", "A")
     active_launcher = next((l for l in launchers if l["id"] == active), None)
     active_account_id = active_launcher.get("account_id") if active_launcher else None
+    active_account = account_map.get(active_account_id) or {}
+    active_bound_account_id = active_account.get("bound_account_id")
     quota_usage_logs = []
     if active_account_id:
         with conn() as c:
@@ -566,6 +591,7 @@ def get_state():
     enabled = [l for l in launchers if l["enabled"]]
 
     next_launcher = None
+    suggested_launchers = []
     recommendation = {
         "mode": "none",
         "warning": None,
@@ -576,25 +602,31 @@ def get_state():
         ids = [l["id"] for l in enabled]
         start = ids.index(active) if active in ids else -1
         rotated = [enabled[(start + i) % len(enabled)] for i in range(1, len(enabled) + 1)]
-        candidates = [l for l in rotated if l["id"] != active and account_map.get(l.get("account_id"))]
-        distinct = [l for l in candidates if l.get("account_id") != active_account_id]
-        pool = distinct or candidates
+        candidates = [l for l in rotated if l["id"] != active and recommendation_eligible(account_map.get(l.get("account_id")), now)]
+        # Different mnemonics / launcher profiles can bind the same real account.
+        # Switching those profiles cannot provide a different quota pool.
+        pool = [l for l in candidates
+                if l.get("account_id") != active_account_id
+                and (not active_bound_account_id
+                     or account_map[l["account_id"]].get("bound_account_id") != active_bound_account_id)]
 
         safe = [l for l in pool if not account_risk(account_map.get(l.get("account_id")), five_threshold, plus_weekly_threshold)["dangerous"]]
+        def recovery_key(l):
+            a = account_map[l["account_id"]]
+            resets = [int(a.get(reset) or 0) for remaining, reset in
+                      (("weekly_remaining", "weekly_reset_at"), ("five_hour_remaining", "five_hour_reset_at"))
+                      if int(a.get(remaining, 100) or 0) < 5]
+            return max(resets) if resets else int(a.get("five_hour_reset_at") or 2**62)
+
+        ordered = safe + sorted([l for l in pool if l not in safe], key=recovery_key)
+        suggested_launchers = [l["id"] for l in ordered[:3]]
         if safe:
             # Preserve the familiar launcher rotation among accounts that are safe for another session.
             next_launcher = safe[0]["id"]
             recommendation["mode"] = "safe"
         elif pool:
-            # No safe account remains. Recommend the account whose 5-hour window will recover first.
-            # Missing reset timestamps sort last because there is no known near-term recovery time.
-            def fallback_key(l):
-                a = account_map.get(l.get("account_id")) or {}
-                reset_at = a.get("five_hour_reset_at")
-                reset_rank = int(reset_at) if reset_at and int(reset_at) > now else 2**62
-                return (reset_rank, -int(a.get("five_hour_remaining", 0) or 0), -int(a.get("weekly_remaining", 0) or 0), l["id"])
-
-            choice = sorted(pool, key=fallback_key)[0]
+            # Only eligible accounts remain, including near-term recoveries.
+            choice = ordered[0]
             next_launcher = choice["id"]
             recommendation["mode"] = "unsafe_fallback"
             risks = [account_risk(account_map.get(l.get("account_id")), five_threshold, plus_weekly_threshold) for l in pool]
@@ -612,6 +644,7 @@ def get_state():
         "history": history,
         "quota_usage_logs": quota_usage_logs,
         "next_launcher": next_launcher,
+        "suggested_launchers": suggested_launchers,
         "recommendation": recommendation,
         "db_path": str(DB_PATH),
         "max_launchers": MAX_LAUNCHERS,
@@ -835,9 +868,9 @@ def parse_wham_usage(payload):
     }
 
 
-def fetch_wham_usage(access_token, account_id):
+def fetch_wham_usage(access_token, account_id, *, path="usage"):
     req = Request(
-        "https://chatgpt.com/backend-api/wham/usage",
+        f"https://chatgpt.com/backend-api/wham/{path}",
         headers={
             "Authorization": f"Bearer {access_token}",
             "ChatGPT-Account-Id": account_id,
@@ -861,6 +894,55 @@ def fetch_wham_usage(access_token, account_id):
         return json.loads(raw)
     except json.JSONDecodeError:
         raise ValueError("Quota service returned invalid JSON")
+
+
+def parse_reset_credit_expirations(payload, now=None):
+    """Keep available Codex credits only; null means a credit never expires."""
+    if not isinstance(payload, dict) or not isinstance(payload.get("credits"), list):
+        raise ValueError("Unexpected reset-credit details response")
+    now = epoch() if now is None else now
+    expirations = []
+    for credit in payload["credits"]:
+        if not isinstance(credit, dict) or credit.get("status") != "available":
+            continue
+        if credit.get("reset_type") != "codex_rate_limits":
+            continue
+        raw = credit.get("expires_at")
+        if raw is None:
+            expirations.append(None)
+            continue
+        try:
+            if isinstance(raw, bool):
+                raise ValueError("Invalid expiry")
+            if isinstance(raw, (int, float)):
+                expires = int(raw)
+            else:
+                date = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+                if date.tzinfo is None:
+                    date = date.replace(tzinfo=timezone.utc)
+                expires = int(date.timestamp())
+        except (ValueError, TypeError, OverflowError, AttributeError):
+            raise ValueError("Invalid reset-credit expiry") from None
+        if expires > now:
+            expirations.append(expires)
+    return sorted(expirations, key=lambda value: float("inf") if value is None else value)
+
+
+def append_reset_credit_details(fields, values, oauth, usage):
+    # Detail lookup failure must never discard a successful quota sync.
+    count = usage.get("reset_count")
+    if count is None:
+        return
+    try:
+        expirations = [] if count == 0 else parse_reset_credit_expirations(
+            fetch_wham_usage(oauth["access_token"], oauth["account_id"], path="rate-limit-reset-credits")
+        )
+    except Exception:
+        fields.append("reset_credits_error=?")
+        values.append("Reset-credit details could not be refreshed")
+        return
+    fields.extend(["reset_credit_expirations=?", "reset_credits_sync_at=?", "reset_credits_error=NULL"])
+    values.extend([json.dumps(expirations), epoch()])
 
 
 def _sync_error_code(error):
@@ -991,6 +1073,7 @@ def sync_real_account(launcher_id):
     if usage.get("reset_count") is not None:
         fields.append("reset_count=?")
         values.append(int(usage["reset_count"]))
+    append_reset_credit_details(fields, values, oauth, usage)
     values.append(account_id)
     with conn() as c:
         c.execute(f"UPDATE accounts SET {','.join(fields)} WHERE id=?", values)
@@ -1167,6 +1250,7 @@ def _verify_pending_prime(account_id, launcher_id, now=None):
     if usage.get("reset_count") is not None:
         fields.append("reset_count=?")
         values.append(int(usage["reset_count"]))
+    append_reset_credit_details(fields, values, oauth, usage)
     values.append(int(account_id))
     with conn() as c:
         c.execute(f"UPDATE accounts SET {','.join(fields)} WHERE id=?", values)
