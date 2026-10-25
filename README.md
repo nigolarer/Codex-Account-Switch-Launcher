@@ -45,6 +45,8 @@ Wide windows fit up to five rows beside the current card, moving overflow into t
 
 For daily use, switch account logins inside A. A row's Launch button opens the corresponding launcher for binding or maintenance; inspection mode does not transfer login credentials into A. Turn the mode off to restore full cards and recent switch history.
 
+Current account quota usage automatically merges consecutive intervals when both 5-hour and weekly consumption are 0%. Three five-minute intervals appear as one fifteen-minute interval without extra merge labels. Intervals starting before today show their start month, day, hour, and minute; today’s intervals show the sync hour and minute. Each group spans at most 48 hours; nonzero usage, resets, missing data, or launcher changes start a separate group. Existing records are included. The latest 576 raw samples per account are retained, and the latest 48 groups are displayed.
+
 ## How it works
 
 Codex Switcher separates **launch profiles** from **account labels**.

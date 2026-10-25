@@ -447,6 +447,51 @@ def clamp_percent(value, default):
         return default
 
 
+QUOTA_ZERO_MERGE_MAX_SECONDS = 48 * 60 * 60
+
+
+def compact_quota_usage_logs(logs):
+    """Compact adjacent zero-usage intervals, preserving the underlying samples.
+
+    Input and output are newest first. Group oldest first so each group's start
+    stays fixed as new samples arrive. Never infer zero usage from missing data.
+    """
+    groups = []
+    previous_sample = None
+    previous_was_zero = False
+    for sample in reversed(logs):
+        row = dict(sample, merged_count=1)
+        start, end = row["previous_observed_at"], row["observed_at"]
+        is_zero = (
+            start is not None and start < end
+            and previous_sample is not None
+            and start == previous_sample["observed_at"]
+            and row["account_id"] == previous_sample["account_id"]
+            and all(
+                row[f"{kind}_consumed"] == 0 and not row[f"{kind}_reset"]
+                and row[f"{kind}_remaining"] is not None
+                and row[f"{kind}_remaining"] == previous_sample[f"{kind}_remaining"]
+                for kind in ("five_hour", "weekly")
+            )
+        )
+        group = groups[-1] if groups else None
+        if (
+            is_zero and previous_was_zero
+            and group["account_id"] == row["account_id"]
+            and group["launcher_id"] == row["launcher_id"]
+            and group["observed_at"] == start
+            and end - group["previous_observed_at"] <= QUOTA_ZERO_MERGE_MAX_SECONDS
+        ):
+            row["previous_observed_at"] = group["previous_observed_at"]
+            row["merged_count"] = group["merged_count"] + 1
+            groups[-1] = row
+        else:
+            groups.append(row)
+        previous_sample = sample
+        previous_was_zero = is_zero
+    return list(reversed(groups))
+
+
 def record_quota_usage(c, account_id, launcher_id, observed_at, five_remaining, weekly_remaining, source="sync"):
     """Persist one official quota observation and its delta from the previous observation."""
     account_id = int(account_id)
@@ -583,11 +628,11 @@ def get_state():
     quota_usage_logs = []
     if active_account_id:
         with conn() as c:
-            quota_usage_logs = rows_to_dict(c.execute(
+            quota_usage_logs = compact_quota_usage_logs(rows_to_dict(c.execute(
                 "SELECT * FROM quota_usage_logs WHERE account_id=? "
-                "ORDER BY observed_at DESC,id DESC LIMIT 48",
+                "ORDER BY observed_at DESC,id DESC LIMIT 576",
                 (active_account_id,),
-            ).fetchall())
+            ).fetchall()))[:48]
     enabled = [l for l in launchers if l["enabled"]]
 
     next_launcher = None
