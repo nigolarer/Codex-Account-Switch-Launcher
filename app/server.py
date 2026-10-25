@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+import base64
+import binascii
 import json
 from datetime import datetime, timezone
 import os
@@ -688,6 +690,7 @@ def get_state():
         "state": st,
         "history": history,
         "quota_usage_logs": quota_usage_logs,
+        "current_subscription": read_launcher_subscription(active_launcher, active_bound_account_id),
         "next_launcher": next_launcher,
         "suggested_launchers": suggested_launchers,
         "recommendation": recommendation,
@@ -783,6 +786,50 @@ def launcher_auth_home(launcher_row):
     if not raw:
         raise ValueError("Launcher has no CODEX_HOME configured")
     return Path(os.path.expandvars(os.path.expanduser(raw))).resolve()
+
+
+def read_launcher_subscription(launcher_row, bound_account_id):
+    """Read display-only subscription claims; never use this unverified JWT for auth.
+
+    This is a login-time snapshot, not a live billing lookup. Match both account
+    IDs so switching logins cannot attach another account's date to the mnemonic.
+    """
+    if not launcher_row or not bound_account_id:
+        return None
+    try:
+        data = json.loads((launcher_auth_home(launcher_row) / "auth.json").read_text(encoding="utf-8"))
+        tokens = data.get("tokens") or {}
+        if tokens.get("account_id") != bound_account_id:
+            return None
+        parts = tokens.get("id_token", "").split(".")
+        if len(parts) != 3:
+            return None
+        payload = json.loads(base64.urlsafe_b64decode(parts[1] + "=" * (-len(parts[1]) % 4)))
+        claims = payload.get("https://api.openai.com/auth") or {}
+        if claims.get("chatgpt_account_id") != bound_account_id:
+            return None
+        plan = str(claims.get("chatgpt_plan_type") or "").strip()
+        if not plan or plan.lower() == "free":
+            return None
+
+        def timestamp(value):
+            date = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            if date.tzinfo is None:
+                raise ValueError("Subscription timestamp requires timezone")
+            result = int(date.timestamp())
+            if result <= 0:
+                raise ValueError("Invalid subscription timestamp")
+            return result
+
+        until = timestamp(claims["chatgpt_subscription_active_until"])
+        checked = claims.get("chatgpt_subscription_last_checked")
+        try:
+            checked = timestamp(checked) if checked else None
+        except (ValueError, TypeError, AttributeError, OverflowError):
+            checked = None
+        return {"plan_type": plan, "active_until": until, "last_checked_at": checked}
+    except (OSError, ValueError, TypeError, KeyError, AttributeError, OverflowError, binascii.Error):
+        return None
 
 
 def read_launcher_oauth(launcher_row):
